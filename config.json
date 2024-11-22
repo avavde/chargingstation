@@ -1,4 +1,8 @@
 {
+    "defaultDB": "./defaultDB.json",
+    "ocpp": {
+      "centralSystemUrl": "ws://www.ecarup.com/api/Ocpp16/110D687EEDFDAE52"
+    },
     "stations": [
       {
         "name": "Station1",

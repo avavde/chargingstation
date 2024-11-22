@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "babel-runtime": "^6.26.0",
+    "fs": "^0.0.1-security",
+    "modbus-serial": "^8.0.17",
+    "node-opcua": "^2.136.0",
+    "ocpp": "^0.0.1",
+    "ocpp-eliftech": "^1.0.2",
+    "ocpp-js": "^1.1.6"
+  }
+}
