@@ -115,7 +115,8 @@ async function initializeOPCUAServer() {
   config.stations.forEach(station => {
     station.ports.forEach(port => {
       const portKey = `${station.name}_port${port.number}`;
-      dev[portKey] = { Stat: 0, Finish: 0, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
+
+    dev[portKey] = { Stat: 0, Finish: false, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
 
       namespace.addVariable({
         componentOf: stationNode,
@@ -140,15 +141,15 @@ async function initializeOPCUAServer() {
         accessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         userAccessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         value: {
-          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: dev[portKey].Finish }),
+          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: Boolean(dev[portKey].Finish) }),
           set: (variant) => {
-            dev[portKey].Finish = !!variant.value;
+            dev[portKey].Finish = !!variant.value; // Преобразуем в булевое значение
             if (dev[portKey].Finish) handleFinish(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
         },
       });
-
+      
       namespace.addVariable({
         componentOf: stationNode,
         browseName: `${portKey}_Kwt`,
