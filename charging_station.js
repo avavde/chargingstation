@@ -181,7 +181,7 @@ async function initializeOPCUAServer() {
   await server.start();
   console.log(`OPC UA сервер запущен по адресу: ${server.endpoints[0].endpointDescriptions()[0].endpointUrl}`);
 }
-}
+
 
 // Функция для обновления данных OPC UA
 async function startOPCUAUpdateLoop() {
