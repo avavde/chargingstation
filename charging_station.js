@@ -116,7 +116,7 @@ async function initializeOPCUAServer() {
     station.ports.forEach(port => {
       const portKey = `${station.name}_port${port.number}`;
 
-    dev[portKey] = { Stat: 0, Finish: false, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
+      dev[portKey] = { Stat: 0, Finish: false, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
 
       namespace.addVariable({
         componentOf: stationNode,
@@ -125,13 +125,14 @@ async function initializeOPCUAServer() {
         accessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         userAccessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         value: {
-          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: Boolean(dev[portKey].Finish) }),
+          get: () => new opcua.Variant({ dataType: opcua.DataType.Int32, value: dev[portKey].Stat }),
           set: (variant) => {
-            dev[portKey].Finish = !!variant.value; // Преобразуем значение в булевое
-            if (dev[portKey].Finish) handleFinish(station.name, port.number);
+            dev[portKey].Stat = variant.value;
+            handleStatChange(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
-        },        
+        },
+        minimumSamplingInterval: 1000,
       });
 
       namespace.addVariable({
@@ -143,13 +144,14 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: Boolean(dev[portKey].Finish) }),
           set: (variant) => {
-            dev[portKey].Finish = !!variant.value; // Преобразуем в булевое значение
+            dev[portKey].Finish = !!variant.value; // Преобразование в boolean
             if (dev[portKey].Finish) handleFinish(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
         },
+        minimumSamplingInterval: 1000,
       });
-      
+
       namespace.addVariable({
         componentOf: stationNode,
         browseName: `${portKey}_Kwt`,
@@ -159,6 +161,7 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Double, value: dev[portKey].Kwt }),
         },
+        minimumSamplingInterval: 1000,
       });
 
       namespace.addVariable({
@@ -170,12 +173,14 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Double, value: dev[portKey].Current }),
         },
+        minimumSamplingInterval: 1000,
       });
     });
   });
 
   await server.start();
   console.log(`OPC UA сервер запущен по адресу: ${server.endpoints[0].endpointDescriptions()[0].endpointUrl}`);
+}
 }
 
 // Функция для обновления данных OPC UA
@@ -329,7 +334,7 @@ function controlRelay(path, state) {
 }
 
 function resetPort(portKey) {
-  dev[portKey] = { Stat: 0, Finish: 0, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
+  dev[portKey] = { Stat: 0, Finish: false, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
   console.log(`${portKey} сброшен.`);
 }
 
