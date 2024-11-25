@@ -124,13 +124,13 @@ async function initializeOPCUAServer() {
         accessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         userAccessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         value: {
-          get: () => new opcua.Variant({ dataType: opcua.DataType.Int32, value: dev[portKey].Stat }),
+          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: Boolean(dev[portKey].Finish) }),
           set: (variant) => {
-            dev[portKey].Stat = variant.value;
-            handleStatChange(station.name, port.number);
+            dev[portKey].Finish = !!variant.value; // Преобразуем значение в булевое
+            if (dev[portKey].Finish) handleFinish(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
-        },
+        },        
       });
 
       namespace.addVariable({
