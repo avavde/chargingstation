@@ -1,54 +1,59 @@
 const opcua = require("node-opcua");
 const ModbusRTU = require("modbus-serial");
-const { RPCClient } = require("ocpp-rpc");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
+const WebSocket = require("ws");
+const { ChargePointClient } = require("@lhci/node-ocpp"); // Новый OCPP клиент
 
 // Путь к файлу конфигурации
-const configPath = "./config/config.json";
+const configPath = './config/config.json';
 
 // Проверяем наличие файла конфигурации
 if (!fs.existsSync(configPath)) {
   console.error(`Файл config.json не найден по пути: ${configPath}. Создаем файл с дефолтной конфигурацией.`);
 
+  // Создаем дефолтную конфигурацию, если файл не существует
   const defaultConfig = {
-    ocpp: {
-      centralSystemUrl: "ws://www.ecarup.com/api/Ocpp16/110D687EEDFDAE52",
+    "ocpp": {
+      "centralSystemUrl": "ws://www.ecarup.com/api/Ocpp16/110D687EEDFDAE52"
     },
-    stations: [
+    "stations": [
       {
-        name: "Station1",
-        ports: [
+        "name": "Station1",
+        "ports": [
           {
-            number: 1,
-            relayPath: "/sys/class/gpio/gpio121/value",
-            meterAddress: 1,
-            meterRegister: 5218,
-            currentRegister: 5220,
+            "number": 1,
+            "relayPath": "/sys/class/gpio/gpio121/value",
+            "meterAddress": 1,
+            "meterRegister": 5218,
+            "currentRegister": 5220
           },
           {
-            number: 2,
-            relayPath: "/sys/class/gpio/gpio122/value",
-            meterAddress: 2,
-            meterRegister: 5218,
-            currentRegister: 5220,
-          },
-        ],
-      },
+            "number": 2,
+            "relayPath": "/sys/class/gpio/gpio122/value",
+            "meterAddress": 2,
+            "meterRegister": 5218,
+            "currentRegister": 5220
+          }
+        ]
+      }
     ],
-    modbusPort: "/dev/ttymxc4",
-    modbusBaudRate: 9600,
+    "modbusPort": "/dev/ttymxc4",
+    "modbusBaudRate": 9600
   };
 
-  const configDir = "./config";
+  // Создаем директорию, если она не существует
+  const configDir = './config';
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir);
   }
 
+  // Записываем дефолтный конфиг в файл
   fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
   console.log("Файл config.json создан с дефолтной конфигурацией.");
 }
 
+// Загружаем конфигурацию
 let config;
 try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -57,14 +62,19 @@ try {
   process.exit(1);
 }
 
+// Проверяем наличие необходимых параметров в конфигурации
 if (!config.ocpp || !config.ocpp.centralSystemUrl) {
   console.error("Отсутствуют необходимые параметры в конфигурации.");
   process.exit(1);
 }
 
+const transactionsFile = "./transactions.json";
+
+// Инициализируем переменные
 const dev = {};
 const chargePoints = {};
 
+// Конфигурация Modbus клиента
 const modbusClient = new ModbusRTU();
 modbusClient.connectRTUBuffered(config.modbusPort, {
   baudRate: config.modbusBaudRate,
@@ -80,6 +90,7 @@ modbusClient.connectRTUBuffered(config.modbusPort, {
   }
 });
 
+// Инициализация OPC UA сервера
 const server = new opcua.OPCUAServer({
   port: 4840,
   resourcePath: "/opcua/server",
@@ -90,6 +101,7 @@ const server = new opcua.OPCUAServer({
   },
 });
 
+// Функция для инициализации OPC UA сервера
 async function initializeOPCUAServer() {
   await server.initialize();
   const addressSpace = server.engine.addressSpace;
@@ -100,10 +112,11 @@ async function initializeOPCUAServer() {
     browseName: "ChargingStations",
   });
 
-  config.stations.forEach((station) => {
-    station.ports.forEach((port) => {
+  config.stations.forEach(station => {
+    station.ports.forEach(port => {
       const portKey = `${station.name}_port${port.number}`;
-      dev[portKey] = { Stat: 0, Finish: 0, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
+
+      dev[portKey] = { Stat: 0, Finish: false, Kwt: 0, Summ: 0, Current: 0, transactionId: null };
 
       namespace.addVariable({
         componentOf: stationNode,
@@ -115,9 +128,11 @@ async function initializeOPCUAServer() {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Int32, value: dev[portKey].Stat }),
           set: (variant) => {
             dev[portKey].Stat = variant.value;
+            handleStatChange(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
         },
+        minimumSamplingInterval: 1000,
       });
 
       namespace.addVariable({
@@ -127,12 +142,14 @@ async function initializeOPCUAServer() {
         accessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         userAccessLevel: opcua.AccessLevelFlag.CurrentRead | opcua.AccessLevelFlag.CurrentWrite,
         value: {
-          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: dev[portKey].Finish }),
+          get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: Boolean(dev[portKey].Finish) }),
           set: (variant) => {
             dev[portKey].Finish = !!variant.value;
+            if (dev[portKey].Finish) handleFinish(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
         },
+        minimumSamplingInterval: 1000,
       });
 
       namespace.addVariable({
@@ -144,6 +161,7 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Double, value: dev[portKey].Kwt }),
         },
+        minimumSamplingInterval: 1000,
       });
 
       namespace.addVariable({
@@ -155,6 +173,7 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Double, value: dev[portKey].Current }),
         },
+        minimumSamplingInterval: 1000,
       });
     });
   });
@@ -163,39 +182,47 @@ async function initializeOPCUAServer() {
   console.log(`OPC UA сервер запущен по адресу: ${server.endpoints[0].endpointDescriptions()[0].endpointUrl}`);
 }
 
-function setupOCPPClient(chargePointId) {
-  const client = new RPCClient(config.ocpp.centralSystemUrl, chargePointId, { protocols: ["ocpp1.6"] });
+// OCPP: Функция подключения и обработки логики OCPP
+function setupOCPP(stationName, port) {
+  const client = new ChargePointClient({
+    endpoint: config.ocpp.centralSystemUrl,
+    chargePointId: `${stationName}_port${port.number}`,
+  });
 
   client.on("connect", () => {
-    console.log(`${chargePointId} подключен к центральной системе.`);
-    client.call("BootNotification", {
-      chargePointVendor: "Vendor1",
-      chargePointModel: "Model1",
-    }).then((response) => {
-      console.log(`BootNotification ответ:`, response);
-    }).catch((err) => {
-      console.error("Ошибка BootNotification:", err);
+    console.log(`OCPP: Подключен зарядный порт ${stationName}_port${port.number}`);
+    client.sendBootNotification({
+      chargePointVendor: "ExampleVendor",
+      chargePointModel: "ExampleModel",
     });
   });
 
-  client.on("error", (error) => {
-    console.error(`Ошибка OCPP клиента: ${error}`);
+  client.on("message", (message) => {
+    console.log(`OCPP: Сообщение для ${stationName}_port${port.number}`, message);
+  });
+
+  client.on("disconnect", () => {
+    console.log(`OCPP: Соединение с портом ${stationName}_port${port.number} закрыто`);
   });
 
   client.connect();
-  return client;
 }
 
+// Запуск программы
 (async () => {
   console.log("Инициализация программы...");
 
+  // Инициализация OPC UA сервера
   await initializeOPCUAServer();
   console.log("OPC UA сервер запущен.");
 
+  // Настройка OCPP
   config.stations.forEach((station) => {
     station.ports.forEach((port) => {
-      const chargePointId = `Station_${station.name}_Port_${port.number}`;
-      chargePoints[chargePointId] = setupOCPPClient(chargePointId);
+      setupOCPP(station.name, port);
     });
   });
+
+  // Запуск цикла обновления данных Modbus
+  startOPCUAUpdateLoop();
 })();
