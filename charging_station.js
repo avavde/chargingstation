@@ -101,6 +101,7 @@ const server = new opcua.OPCUAServer({
   },
 });
 
+// Функция для инициализации OPC UA сервера
 async function initializeOPCUAServer() {
   await server.initialize();
   const addressSpace = server.engine.addressSpace;
@@ -141,7 +142,7 @@ async function initializeOPCUAServer() {
         value: {
           get: () => new opcua.Variant({ dataType: opcua.DataType.Boolean, value: dev[portKey].Finish }),
           set: (variant) => {
-            dev[portKey].Finish = variant.value;
+            dev[portKey].Finish = !!variant.value;
             if (dev[portKey].Finish) handleFinish(station.name, port.number);
             return opcua.StatusCodes.Good;
           },
@@ -192,11 +193,9 @@ async function startOPCUAUpdateLoop() {
             const low = data.data[1];
             dev[portKey].Kwt = (high << 16) | low;
 
-            modbusClient.setID(port.meterAddress);
             const currentData = await modbusClient.readHoldingRegisters(port.currentRegister, 1);
             dev[portKey].Current = currentData.data[0];
 
-            // Логируем обновленные данные
             console.log(`Обновление OPC UA: ${portKey} - Энергия: ${dev[portKey].Kwt} кВт·ч, Текущий ток: ${dev[portKey].Current} А`);
           } catch (err) {
             console.error(`Ошибка при обновлении данных для ${portKey}: ${err.message}`);
