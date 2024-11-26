@@ -76,9 +76,9 @@ console.log(`[${new Date().toISOString()}] OCPP-клиент создан с н�
 client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
 
-  // Отправка BootNotification
+  // Отправка BootNotification через вызов
   try {
-    const bootResponse = await client.send("BootNotification", {
+    const bootResponse = await client.call("BootNotification", {
       chargePointVendor: "MyVendor",
       chargePointModel: "MyModel",
       chargePointSerialNumber: config.stationName,
@@ -106,19 +106,11 @@ client.on("message", (direction, message) => {
   console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
 });
 
-// Обработчик Authorize
-client.handle("Authorize", async (payload) => {
-  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
-  const response = { idTagInfo: { status: "Accepted" } };
-  console.log(`[${new Date().toISOString()}] Authorize response:`, JSON.stringify(response, null, 2));
-  return response;
-});
-
 // Отправка начальных статусов разъемов
 async function sendInitialStatusNotifications() {
   for (const connector of config.connectors) {
     try {
-      const statusResponse = await client.send("StatusNotification", {
+      const statusResponse = await client.call("StatusNotification", {
         connectorId: connector.id,
         status: "Available",
         errorCode: "NoError",
