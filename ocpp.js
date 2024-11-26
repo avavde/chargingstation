@@ -1,6 +1,6 @@
 const fs = require("fs");
 const ModbusRTU = require("modbus-serial");
-const SerialPort = require("serialport");
+const { SerialPort } = require("serialport");
 const Readline = require("@serialport/parser-readline");
 const { RPCClient } = require("ocpp-rpc");
 
@@ -25,96 +25,6 @@ try {
 
 // Инициализация переменных
 const dev = {};
-
-// Подключение к Modbus
-const modbusClient = new ModbusRTU();
-modbusClient.connectRTUBuffered(
-  config.modbusPort,
-  {
-    baudRate: config.modbusBaudRate,
-    dataBits: 8,
-    stopBits: 2,
-    parity: "none",
-  },
-  (err) => {
-    if (err) {
-      console.error(`[${new Date().toISOString()}] Ошибка подключения к Modbus: ${err.message}`);
-      process.exit(1);
-    } else {
-      console.log(`[${new Date().toISOString()}] Modbus успешно подключен.`);
-    }
-  }
-);
-
-// Функция чтения серийного номера счётчика
-async function readMeterSerialNumber(connector) {
-  try {
-    modbusClient.setID(connector.meterAddress);
-    const serialNumberData = await modbusClient.readHoldingRegisters(connector.serialNumberRegister, 4); // Предполагаем, что серийный номер занимает 4 регистра
-    const buffer = Buffer.alloc(8);
-    for (let i = 0; i < 4; i++) {
-      buffer.writeUInt16BE(serialNumberData.data[i], i * 2);
-    }
-    const serialNumber = buffer.toString("ascii").trim();
-    return serialNumber;
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${connector.id}: ${error.message}`);
-    return null;
-  }
-}
-
-// Инициализация состояния разъемов
-(async () => {
-  for (const connector of config.connectors) {
-    const connectorKey = `${config.stationName}_connector${connector.id}`;
-    dev[connectorKey] = {
-      Stat: 0,
-      Finish: false,
-      Kwt: 0,
-      Summ: 0,
-      Current: 0,
-      transactionId: null,
-      status: "Available",
-      meterSerialNumber: null,
-    };
-    dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
-    console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
-  }
-})();
-
-// Функция чтения информации о модеме (ICCID и IMSI)
-async function getModemInfo() {
-  return new Promise((resolve, reject) => {
-    const port = new SerialPort(config.modemPort, { baudRate: 115200 });
-    const parser = port.pipe(new Readline({ delimiter: "\r\n" }));
-    let iccid = null;
-    let imsi = null;
-
-    parser.on("data", (line) => {
-      if (line.includes("CCID")) {
-        iccid = line.split(":")[1].trim();
-      }
-      if (/^\d{15}$/.test(line.trim())) {
-        imsi = line.trim();
-      }
-      if (iccid && imsi) {
-        port.close();
-        resolve({ iccid, imsi });
-      }
-    });
-
-    port.on("open", () => {
-      port.write("AT+CCID\r");
-      setTimeout(() => {
-        port.write("AT+CIMI\r");
-      }, 500);
-    });
-
-    port.on("error", (err) => {
-      reject(err);
-    });
-  });
-}
 
 // Создание OCPP-клиента
 const client = new RPCClient({
@@ -174,13 +84,123 @@ function controlRelay(path, state) {
   }
 }
 
+// Подключение к Modbus и инициализация разъёмов
+const modbusClient = new ModbusRTU();
+
+modbusClient.connectRTUBuffered(
+  config.modbusPort,
+  {
+    baudRate: config.modbusBaudRate,
+    dataBits: 8,
+    stopBits: 2,
+    parity: "none",
+  },
+  async (err) => {
+    if (err) {
+      console.error(`[${new Date().toISOString()}] Ошибка подключения к Modbus: ${err.message}`);
+      process.exit(1);
+    } else {
+      console.log(`[${new Date().toISOString()}] Modbus успешно подключен.`);
+
+      // Инициализация состояния разъемов
+      for (const connector of config.connectors) {
+        const connectorKey = `${config.stationName}_connector${connector.id}`;
+        dev[connectorKey] = {
+          Stat: 0,
+          Finish: false,
+          Kwt: 0,
+          Summ: 0,
+          Current: 0,
+          transactionId: null,
+          status: "Available",
+          meterSerialNumber: null,
+        };
+        dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
+        console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
+      }
+
+      // Теперь можем подключиться к OCPP и запустить основной цикл
+      await startOCPPClient();
+    }
+  }
+);
+
+// Функция чтения серийного номера счётчика
+async function readMeterSerialNumber(connector) {
+  try {
+    modbusClient.setID(connector.meterAddress);
+    const serialNumberData = await modbusClient.readHoldingRegisters(connector.serialNumberRegister, 4); // Предполагаем, что серийный номер занимает 4 регистра
+    const buffer = Buffer.alloc(8);
+    for (let i = 0; i < 4; i++) {
+      buffer.writeUInt16BE(serialNumberData.data[i], i * 2);
+    }
+    const serialNumber = buffer.toString("ascii").trim();
+    return serialNumber;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${connector.id}: ${error.message}`);
+    return null;
+  }
+}
+
+// Функция чтения информации о модеме (ICCID и IMSI)
+async function getModemInfo() {
+  return new Promise((resolve) => {
+    const port = new SerialPort({ path: config.modemPort, baudRate: 115200 });
+    const parser = port.pipe(new Readline({ delimiter: "\r\n" }));
+    let iccid = null;
+    let imsi = null;
+
+    parser.on("data", (line) => {
+      line = line.trim();
+      if (line.includes("CCID")) {
+        iccid = line.split(":")[1].trim();
+      }
+      if (/^\d{15}$/.test(line)) {
+        imsi = line;
+      }
+      if (iccid && imsi) {
+        port.close();
+        resolve({ iccid, imsi });
+      }
+    });
+
+    port.on("open", () => {
+      port.write("AT+CCID\r");
+      setTimeout(() => {
+        port.write("AT+CIMI\r");
+      }, 500);
+    });
+
+    port.on("error", (err) => {
+      console.error(`[${new Date().toISOString()}] Ошибка чтения данных модема: ${err.message}`);
+      resolve({ iccid: null, imsi: null });
+    });
+  });
+}
+
+// Функция запуска OCPP-клиента и основного цикла
+async function startOCPPClient() {
+  try {
+    await client.connect();
+    console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
+    updateModbusData();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
+  }
+}
+
 // Отправка BootNotification
 client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Отправка BootNotification...`);
   try {
     // Получение информации о модеме
-    const modemInfo = await getModemInfo();
-    console.log(`[${new Date().toISOString()}] Информация о модеме:`, modemInfo);
+    let modemInfo = { iccid: null, imsi: null };
+    try {
+      modemInfo = await getModemInfo();
+      console.log(`[${new Date().toISOString()}] Информация о модеме:`, modemInfo);
+    } catch (modemError) {
+      console.error(`[${new Date().toISOString()}] Не удалось получить информацию о модеме: ${modemError.message}`);
+    }
 
     // Собираем серийные номера счетчиков
     const meterSerialNumbers = config.connectors.map((connector) => {
@@ -188,15 +208,23 @@ client.on("open", async () => {
       return dev[connectorKey].meterSerialNumber || "Unknown";
     });
 
-    const bootResponse = await client.call("BootNotification", {
+    const bootPayload = {
       chargePointVendor: config.vendor,
       chargePointModel: config.model,
       chargePointSerialNumber: config.stationName,
       firmwareVersion: "1.0",
-      iccid: modemInfo.iccid,
-      imsi: modemInfo.imsi,
       meterSerialNumber: meterSerialNumbers.join(","),
-    });
+    };
+
+    // Добавляем информацию о модеме, если она доступна
+    if (modemInfo.iccid) {
+      bootPayload.iccid = modemInfo.iccid;
+    }
+    if (modemInfo.imsi) {
+      bootPayload.imsi = modemInfo.imsi;
+    }
+
+    const bootResponse = await client.call("BootNotification", bootPayload);
     console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
 
     if (bootResponse.status === "Accepted") {
@@ -425,7 +453,7 @@ client.handle("UpdateFirmware", async (payload) => {
 
     // Имитация загрузки и обновления
     setTimeout(async () => {
-      // Отправляем FirmwareStatusNotification со статусом "Installing"
+      // Отправляем FirmwareStatusNotification со статусом "Installation"
       await sendFirmwareStatusNotification("Installing");
 
       // Имитация завершения обновления
@@ -451,14 +479,3 @@ async function sendFirmwareStatusNotification(status) {
     console.error(`[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`);
   }
 }
-
-// Запуск обновления Modbus и подключение к OCPP
-(async () => {
-  try {
-    await client.connect();
-    console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
-    updateModbusData();
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
-  }
-})();
