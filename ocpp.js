@@ -71,10 +71,10 @@ console.log(`[${new Date().toISOString()}] OCPP-клиент создан с н�
 });
 
 // Обработчик события подключения
+// Отправка BootNotification
 client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
 
-  // Отправка BootNotification
   try {
     const bootResponse = await client.call("BootNotification", {
       chargePointVendor: "MyVendor",
@@ -85,10 +85,7 @@ client.on("open", async () => {
     console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
 
     if (bootResponse.status === "Accepted") {
-      // Отправка начальных StatusNotification
       await sendInitialStatusNotifications();
-
-      // Запуск отправки Heartbeat
       const heartbeatInterval = bootResponse.interval * 1000 || 60000; // По умолчанию 60 секунд
       setInterval(sendHeartbeat, heartbeatInterval);
     } else {
