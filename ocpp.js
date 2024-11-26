@@ -1,5 +1,7 @@
 const fs = require("fs");
 const ModbusRTU = require("modbus-serial");
+const SerialPort = require("serialport");
+const Readline = require("@serialport/parser-readline");
 const { RPCClient } = require("ocpp-rpc");
 
 // Путь к конфигурационному файлу
@@ -44,27 +46,81 @@ modbusClient.connectRTUBuffered(
   }
 );
 
+// Функция чтения серийного номера счётчика
+async function readMeterSerialNumber(connector) {
+  try {
+    modbusClient.setID(connector.meterAddress);
+    const serialNumberData = await modbusClient.readHoldingRegisters(connector.serialNumberRegister, 4); // Предполагаем, что серийный номер занимает 4 регистра
+    const buffer = Buffer.alloc(8);
+    for (let i = 0; i < 4; i++) {
+      buffer.writeUInt16BE(serialNumberData.data[i], i * 2);
+    }
+    const serialNumber = buffer.toString("ascii").trim();
+    return serialNumber;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${connector.id}: ${error.message}`);
+    return null;
+  }
+}
+
 // Инициализация состояния разъемов
-config.connectors.forEach((connector) => {
-  const connectorKey = `${config.stationName}_connector${connector.id}`;
-  dev[connectorKey] = {
-    Stat: 0,
-    Finish: false,
-    Kwt: 0,
-    Summ: 0,
-    Current: 0,
-    transactionId: null,
-    status: "Available",
-  };
-  console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
-});
+(async () => {
+  for (const connector of config.connectors) {
+    const connectorKey = `${config.stationName}_connector${connector.id}`;
+    dev[connectorKey] = {
+      Stat: 0,
+      Finish: false,
+      Kwt: 0,
+      Summ: 0,
+      Current: 0,
+      transactionId: null,
+      status: "Available",
+      meterSerialNumber: null,
+    };
+    dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
+    console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
+  }
+})();
+
+// Функция чтения информации о модеме (ICCID и IMSI)
+async function getModemInfo() {
+  return new Promise((resolve, reject) => {
+    const port = new SerialPort(config.modemPort, { baudRate: 115200 });
+    const parser = port.pipe(new Readline({ delimiter: "\r\n" }));
+    let iccid = null;
+    let imsi = null;
+
+    parser.on("data", (line) => {
+      if (line.includes("CCID")) {
+        iccid = line.split(":")[1].trim();
+      }
+      if (/^\d{15}$/.test(line.trim())) {
+        imsi = line.trim();
+      }
+      if (iccid && imsi) {
+        port.close();
+        resolve({ iccid, imsi });
+      }
+    });
+
+    port.on("open", () => {
+      port.write("AT+CCID\r");
+      setTimeout(() => {
+        port.write("AT+CIMI\r");
+      }, 500);
+    });
+
+    port.on("error", (err) => {
+      reject(err);
+    });
+  });
+}
 
 // Создание OCPP-клиента
 const client = new RPCClient({
   endpoint: config.centralSystemUrl,
   identity: config.stationName,
   protocols: ["ocpp1.6"],
-  strictMode: true,
 });
 
 console.log(`[${new Date().toISOString()}] OCPP-клиент создан с настройками:`, {
@@ -103,6 +159,11 @@ client.on("result", (result) => {
   console.log(`[${new Date().toISOString()}] [RESULT]:`, JSON.stringify(result, null, 2));
 });
 
+// Добавляем обработчик для всех сообщений
+client.on("message", (message) => {
+  console.log(`[${new Date().toISOString()}] [MESSAGE]:`, message);
+});
+
 // Функция управления реле
 function controlRelay(path, state) {
   try {
@@ -117,11 +178,24 @@ function controlRelay(path, state) {
 client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Отправка BootNotification...`);
   try {
+    // Получение информации о модеме
+    const modemInfo = await getModemInfo();
+    console.log(`[${new Date().toISOString()}] Информация о модеме:`, modemInfo);
+
+    // Собираем серийные номера счетчиков
+    const meterSerialNumbers = config.connectors.map((connector) => {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      return dev[connectorKey].meterSerialNumber || "Unknown";
+    });
+
     const bootResponse = await client.call("BootNotification", {
       chargePointVendor: config.vendor,
       chargePointModel: config.model,
       chargePointSerialNumber: config.stationName,
       firmwareVersion: "1.0",
+      iccid: modemInfo.iccid,
+      imsi: modemInfo.imsi,
+      meterSerialNumber: meterSerialNumbers.join(","),
     });
     console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
 
@@ -151,11 +225,13 @@ async function sendInitialStatusNotifications() {
 // Функция отправки StatusNotification
 async function sendStatusNotification(connectorId, status, errorCode) {
   try {
+    const connectorKey = `${config.stationName}_connector${connectorId}`;
     const response = await client.call("StatusNotification", {
       connectorId,
       status,
       errorCode,
       timestamp: new Date().toISOString(),
+      info: dev[connectorKey]?.meterSerialNumber || "Unknown",
     });
     console.log(`[${new Date().toISOString()}] StatusNotification отправлен для коннектора ${connectorId}. Ответ:`, JSON.stringify(response, null, 2));
   } catch (error) {
@@ -177,7 +253,7 @@ async function sendHeartbeat() {
 client.handle("RemoteStartTransaction", async (payload) => {
   console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
 
-  const connectorId = payload.connectorId || 1; // Если connectorId не указан, использовать 1
+  const connectorId = payload.connectorId || 1; // Если connectorId не указан, используем 1
   const connectorKey = `${config.stationName}_connector${connectorId}`;
   const connector = config.connectors.find((c) => c.id === connectorId);
 
@@ -293,11 +369,45 @@ async function updateModbusData() {
         console.log(
           `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
         );
+
+        // Отправка MeterValues
+        await sendMeterValues(connector.id);
       } catch (error) {
         console.error(`[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+// Функция отправки MeterValues
+async function sendMeterValues(connectorId) {
+  try {
+    const connectorKey = `${config.stationName}_connector${connectorId}`;
+    if (!dev[connectorKey].transactionId) {
+      return; // Если транзакция не запущена, не отправляем MeterValues
+    }
+    const response = await client.call("MeterValues", {
+      connectorId,
+      transactionId: dev[connectorKey].transactionId,
+      meterValue: [
+        {
+          timestamp: new Date().toISOString(),
+          sampledValue: [
+            {
+              value: dev[connectorKey].Kwt.toString(),
+              context: "Sample.Periodic",
+              format: "Raw",
+              measurand: "Energy.Active.Import.Register",
+              unit: "kWh",
+            },
+          ],
+        },
+      ],
+    });
+    console.log(`[${new Date().toISOString()}] MeterValues отправлен для коннектора ${connectorId}. Ответ:`, JSON.stringify(response, null, 2));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки MeterValues для коннектора ${connectorId}: ${error.message}`);
   }
 }
 
@@ -315,7 +425,7 @@ client.handle("UpdateFirmware", async (payload) => {
 
     // Имитация загрузки и обновления
     setTimeout(async () => {
-      // Отправляем FirmwareStatusNotification со статусом "Installation"
+      // Отправляем FirmwareStatusNotification со статусом "Installing"
       await sendFirmwareStatusNotification("Installing");
 
       // Имитация завершения обновления
