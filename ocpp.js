@@ -5,7 +5,7 @@ const { RPCClient } = require("ocpp-rpc");
 // Путь к конфигурационному файлу
 const configPath = "./config/ocpp_config.json";
 
-// Проверка наличия файла конфигурации
+// Проверка существования конфигурационного файла
 if (!fs.existsSync(configPath)) {
   console.error(`[${new Date().toISOString()}] Файл конфигурации не найден: ${configPath}`);
   process.exit(1);
@@ -17,24 +17,12 @@ try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   console.log(`[${new Date().toISOString()}] Конфигурация успешно загружена:`, JSON.stringify(config, null, 2));
 } catch (error) {
-  console.error(`[${new Date().toISOString()}] Ошибка чтения конфигурации: ${error.message}`);
+  console.error(`[${new Date().toISOString()}] Ошибка при чтении конфигурации: ${error.message}`);
   process.exit(1);
 }
 
-// Инициализация состояния разъемов
+// Инициализация переменных
 const dev = {};
-config.connectors.forEach((connector) => {
-  const connectorKey = `${config.stationName}_connector${connector.id}`;
-  dev[connectorKey] = {
-    Stat: 0,
-    Finish: false,
-    Kwt: 0,
-    Summ: 0,
-    Current: 0,
-    transactionId: null,
-  };
-  console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
-});
 
 // Подключение к Modbus
 const modbusClient = new ModbusRTU();
@@ -56,7 +44,21 @@ modbusClient.connectRTUBuffered(
   }
 );
 
-// Создание клиента OCPP
+// Инициализация состояния разъемов
+config.connectors.forEach((connector) => {
+  const connectorKey = `${config.stationName}_connector${connector.id}`;
+  dev[connectorKey] = {
+    Stat: 0,
+    Finish: false,
+    Kwt: 0,
+    Summ: 0,
+    Current: 0,
+    transactionId: null,
+  };
+  console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
+});
+
+// Создание OCPP-клиента
 const client = new RPCClient({
   endpoint: config.centralSystemUrl,
   identity: config.stationName,
@@ -70,30 +72,9 @@ console.log(`[${new Date().toISOString()}] OCPP-клиент создан с н�
   protocols: ["ocpp1.6"],
 });
 
-// Обработчик события подключения
-// Отправка BootNotification
-client.on("open", async () => {
+// Логирование всех событий клиента
+client.on("open", () => {
   console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
-
-  try {
-    const bootResponse = await client.call("BootNotification", {
-      chargePointVendor: "MyVendor",
-      chargePointModel: "MyModel",
-      chargePointSerialNumber: config.stationName,
-      firmwareVersion: "1.0",
-    });
-    console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
-
-    if (bootResponse.status === "Accepted") {
-      await sendInitialStatusNotifications();
-      const heartbeatInterval = bootResponse.interval * 1000 || 60000; // По умолчанию 60 секунд
-      setInterval(sendHeartbeat, heartbeatInterval);
-    } else {
-      console.error(`[${new Date().toISOString()}] BootNotification отклонен центральной системой.`);
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка при отправке BootNotification: ${error.message}`);
-  }
 });
 
 client.on("close", () => {
@@ -104,39 +85,17 @@ client.on("error", (error) => {
   console.error(`[${new Date().toISOString()}] Ошибка OCPP-клиента: ${error.message}`);
 });
 
-// Логирование всех сообщений
+// Логирование всех входящих и исходящих сообщений
 client.on("message", (direction, message) => {
-  console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
+  try {
+    const dir = typeof direction === "string" ? direction.toUpperCase() : "НЕИЗВЕСТНОЕ_НАПРАВЛЕНИЕ";
+    console.log(`[${new Date().toISOString()}] [${dir}]:`, JSON.stringify(message, null, 2));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка при логировании сообщения: ${error.message}`);
+  }
 });
 
-// Отправка начальных сообщений StatusNotification
-async function sendInitialStatusNotifications() {
-  for (const connector of config.connectors) {
-    try {
-      const statusResponse = await client.call("StatusNotification", {
-        connectorId: connector.id,
-        status: "Available",
-        errorCode: "NoError",
-        timestamp: new Date().toISOString(),
-      });
-      console.log(`[${new Date().toISOString()}] StatusNotification отправлен для разъема ${connector.id}. Ответ:`, JSON.stringify(statusResponse, null, 2));
-    } catch (error) {
-      console.error(`[${new Date().toISOString()}] Ошибка при отправке StatusNotification для разъема ${connector.id}: ${error.message}`);
-    }
-  }
-}
-
-// Отправка сообщения Heartbeat
-async function sendHeartbeat() {
-  try {
-    const heartbeatResponse = await client.call("Heartbeat", {});
-    console.log(`[${new Date().toISOString()}] Heartbeat отправлен. Ответ:`, JSON.stringify(heartbeatResponse, null, 2));
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка при отправке Heartbeat: ${error.message}`);
-  }
-}
-
-// Управление реле
+// Функция управления реле
 function controlRelay(path, state) {
   try {
     fs.writeFileSync(path, state ? "1" : "0");
@@ -146,29 +105,93 @@ function controlRelay(path, state) {
   }
 }
 
-// Обработчик Heartbeat
-client.handle("Heartbeat", async () => {
-  console.log(`[${new Date().toISOString()}] Heartbeat получен.`);
-  return { currentTime: new Date().toISOString() };
+// Отправка BootNotification
+client.on("open", async () => {
+  console.log(`[${new Date().toISOString()}] Отправка BootNotification...`);
+  try {
+    const bootResponse = await client.call("BootNotification", {
+      chargePointVendor: "MyVendor",
+      chargePointModel: "MyModel",
+      chargePointSerialNumber: config.stationName,
+      firmwareVersion: "1.0",
+    });
+    console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
+
+    if (bootResponse.status === "Accepted") {
+      console.log(`[${new Date().toISOString()}] BootNotification принят.`);
+      setInterval(() => sendHeartbeat(), bootResponse.interval * 1000 || 60000);
+    } else {
+      console.error(`[${new Date().toISOString()}] BootNotification отклонен.`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки BootNotification: ${error.message}`);
+  }
 });
 
-// Цикл обновления данных Modbus
-async function startDataUpdateLoop() {
+// Отправка Heartbeat
+async function sendHeartbeat() {
+  try {
+    const response = await client.call("Heartbeat", {});
+    console.log(`[${new Date().toISOString()}] Heartbeat отправлен. Ответ:`, JSON.stringify(response, null, 2));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки Heartbeat: ${error.message}`);
+  }
+}
+
+// Обработчики OCPP-сообщений
+client.handle("Authorize", async (payload) => {
+  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
+  return { idTagInfo: { status: "Accepted" } };
+});
+
+client.handle("StartTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] StartTransaction получен:`, payload);
+  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
+  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
+    return { idTagInfo: { status: "Rejected" } };
+  }
+
+  dev[connectorKey].Stat = 2;
+  dev[connectorKey].transactionId = payload.meterStart || Date.now();
+  controlRelay(connector.relayPath, true);
+
+  return {
+    transactionId: dev[connectorKey].transactionId,
+    idTagInfo: { status: "Accepted" },
+  };
+});
+
+client.handle("StopTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] StopTransaction получен:`, payload);
+  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
+  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
+    return { idTagInfo: { status: "Rejected" } };
+  }
+
+  dev[connectorKey].Stat = 3;
+  controlRelay(connector.relayPath, false);
+
+  return { idTagInfo: { status: "Accepted" } };
+});
+
+// Обработчик данных Modbus
+async function updateModbusData() {
   while (true) {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
       try {
         modbusClient.setID(connector.meterAddress);
 
-        // Чтение энергии
         const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
         dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
 
-        // Чтение тока
         const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
         dev[connectorKey].Current = currentData.data[0];
 
-        // Обновление суммы
         dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
 
         console.log(
@@ -182,14 +205,13 @@ async function startDataUpdateLoop() {
   }
 }
 
-// Запуск OCPP-клиента и цикла обновления
+// Запуск обновления Modbus
 (async () => {
   try {
-    console.log(`[${new Date().toISOString()}] Подключение к центральной системе...`);
     await client.connect();
     console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
-    startDataUpdateLoop();
+    updateModbusData();
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка при запуске OCPP-клиента: ${error.message}`);
+    console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
   }
 })();
