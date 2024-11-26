@@ -1,7 +1,7 @@
 const fs = require("fs");
 const ModbusRTU = require("modbus-serial");
 const { SerialPort } = require("serialport");
-const Readline = require("@serialport/parser-readline");
+const { ReadlineParser } = require("@serialport/parser-readline");
 const { RPCClient } = require("ocpp-rpc");
 
 // Добавляем глобальные обработчики необработанных исключений
@@ -131,30 +131,30 @@ modbusClient.connectRTUBuffered(
       console.log(`[${new Date().toISOString()}] Modbus успешно подключен.`);
 
       // Инициализация состояния разъемов после подключения к Modbus
-      try {
-        for (const connector of config.connectors) {
-          const connectorKey = `${config.stationName}_connector${connector.id}`;
-          dev[connectorKey] = {
-            Stat: 0,
-            Finish: false,
-            Kwt: 0,
-            Summ: 0,
-            Current: 0,
-            transactionId: null,
-            status: "Available",
-            meterSerialNumber: null,
-          };
+      for (const connector of config.connectors) {
+        const connectorKey = `${config.stationName}_connector${connector.id}`;
+        dev[connectorKey] = {
+          Stat: 0,
+          Finish: false,
+          Kwt: 0,
+          Summ: 0,
+          Current: 0,
+          transactionId: null,
+          status: "Available",
+          meterSerialNumber: null,
+        };
+        try {
           dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
           console.log(
             `[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`,
             dev[connectorKey]
           );
+        } catch (readError) {
+          console.error(
+            `[${new Date().toISOString()}] Ошибка чтения серийного номера для разъема ${connector.id}: ${readError.message}`
+          );
+          // Серийный номер останется null
         }
-      } catch (initError) {
-        console.error(
-          `[${new Date().toISOString()}] Ошибка инициализации разъемов: ${initError.message}`
-        );
-        process.exit(1);
       }
 
       // Теперь можем подключиться к OCPP и запустить основной цикл
@@ -178,12 +178,7 @@ async function readMeterSerialNumber(connector) {
     const serialNumber = buffer.toString("ascii").trim();
     return serialNumber;
   } catch (error) {
-    console.error(
-      `[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${
-        connector.id
-      }: ${error.message}`
-    );
-    return null;
+    throw new Error(`Ошибка чтения серийного номера: ${error.message}`);
   }
 }
 
@@ -191,7 +186,7 @@ async function readMeterSerialNumber(connector) {
 async function getModemInfo() {
   return new Promise((resolve) => {
     const port = new SerialPort({ path: config.modemPort, baudRate: 115200 });
-    const parser = port.pipe(new Readline({ delimiter: "\r\n" }));
+    const parser = port.pipe(new ReadlineParser({ delimiter: "\r\n" }));
     let iccid = null;
     let imsi = null;
 
@@ -254,7 +249,7 @@ client.on("open", async () => {
     // Собираем серийные номера счетчиков
     const meterSerialNumbers = config.connectors.map((connector) => {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
-      return dev[connectorKey].meterSerialNumber || "Unknown";
+      return dev[connectorKey]?.meterSerialNumber || "Unknown";
     });
 
     const bootPayload = {
@@ -321,19 +316,6 @@ async function sendStatusNotification(connectorId, status, errorCode) {
     console.error(
       `[${new Date().toISOString()}] Ошибка отправки StatusNotification для коннектора ${connectorId}: ${error.message}`
     );
-  }
-}
-
-// Отправка Heartbeat
-async function sendHeartbeat() {
-  try {
-    const response = await client.call("Heartbeat", {});
-    console.log(
-      `[${new Date().toISOString()}] Heartbeat отправлен. Ответ:`,
-      JSON.stringify(response, null, 2)
-    );
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка отправки Heartbeat: ${error.message}`);
   }
 }
 
@@ -407,6 +389,8 @@ async function updateModbusData() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
+
+// Остальные функции и обработчики остаются без изменений
 
 // Функция отправки MeterValues
 async function sendMeterValues(connectorId) {
