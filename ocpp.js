@@ -75,6 +75,7 @@ console.log(`[${new Date().toISOString()}] OCPP-клиент создан с н�
 // Логирование событий подключения
 client.on("open", () => {
   console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
+  sendStatusNotifications();
 });
 
 client.on("close", () => {
@@ -90,20 +91,13 @@ client.on("message", (direction, message) => {
   console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
 });
 
-// Добавление PIN-кода и разъемов в BootNotification
+// Обработчик BootNotification
 client.handle("BootNotification", async () => {
   console.log(`[${new Date().toISOString()}] BootNotification отправлен.`);
   const payload = {
     status: "Accepted",
     currentTime: new Date().toISOString(),
     interval: 300,
-    additionalInfo: {
-      pinCode: config.pinCode,
-      connectors: config.connectors.map((connector) => ({
-        id: connector.id,
-        type: connector.typeNumber,
-      })),
-    },
   };
   console.log(`[${new Date().toISOString()}] BootNotification payload:`, JSON.stringify(payload, null, 2));
   return payload;
@@ -178,6 +172,30 @@ client.handle("Heartbeat", async () => {
   console.log(`[${new Date().toISOString()}] Heartbeat response:`, JSON.stringify(response, null, 2));
   return response;
 });
+
+// Отправка статусов разъемов
+async function sendStatusNotifications() {
+  for (const connector of config.connectors) {
+    const connectorKey = `${config.stationName}_connector${connector.id}`;
+    try {
+      await client.send("StatusNotification", {
+        connectorId: connector.id,
+        status: dev[connectorKey].Stat === 2 ? "Charging" : "Available",
+        errorCode: "NoError",
+        timestamp: new Date().toISOString(),
+      });
+      console.log(
+        `[${new Date().toISOString()}] StatusNotification отправлен для разъема ${connector.id}: Статус ${
+          dev[connectorKey].Stat === 2 ? "Charging" : "Available"
+        }`
+      );
+    } catch (error) {
+      console.error(
+        `[${new Date().toISOString()}] Ошибка отправки StatusNotification для разъема ${connector.id}: ${error.message}`
+      );
+    }
+  }
+}
 
 // Цикл обновления данных Modbus
 async function startDataUpdateLoop() {
