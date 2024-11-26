@@ -54,6 +54,7 @@ config.connectors.forEach((connector) => {
     Summ: 0,
     Current: 0,
     transactionId: null,
+    status: "Available", // Добавлено поле статуса
   };
   console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
 });
@@ -126,6 +127,8 @@ client.on("open", async () => {
 
     if (bootResponse.status === "Accepted") {
       console.log(`[${new Date().toISOString()}] BootNotification принят.`);
+      // Отправка StatusNotification для каждого коннектора
+      await sendInitialStatusNotifications();
       setInterval(() => sendHeartbeat(), bootResponse.interval * 1000 || 60000);
     } else {
       console.error(`[${new Date().toISOString()}] BootNotification отклонен.`);
@@ -134,6 +137,31 @@ client.on("open", async () => {
     console.error(`[${new Date().toISOString()}] Ошибка отправки BootNotification: ${error.message}`);
   }
 });
+
+// Функция отправки начальных StatusNotification
+async function sendInitialStatusNotifications() {
+  // Отправка StatusNotification для ConnectorId 0 (общий статус станции)
+  await sendStatusNotification(0, "Available", "NoError");
+  // Отправка StatusNotification для каждого коннектора
+  for (const connector of config.connectors) {
+    await sendStatusNotification(connector.id, "Available", "NoError");
+  }
+}
+
+// Функция отправки StatusNotification
+async function sendStatusNotification(connectorId, status, errorCode) {
+  try {
+    const response = await client.call("StatusNotification", {
+      connectorId,
+      status,
+      errorCode,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`[${new Date().toISOString()}] StatusNotification отправлен для коннектора ${connectorId}. Ответ:`, JSON.stringify(response, null, 2));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки StatusNotification для коннектора ${connectorId}: ${error.message}`);
+  }
+}
 
 // Отправка Heartbeat
 async function sendHeartbeat() {
@@ -162,7 +190,11 @@ client.handle("StartTransaction", async (payload) => {
 
   dev[connectorKey].Stat = 2;
   dev[connectorKey].transactionId = payload.meterStart || Date.now();
+  dev[connectorKey].status = "Charging"; // Обновление статуса
   controlRelay(connector.relayPath, true);
+
+  // Отправка StatusNotification с обновленным статусом
+  await sendStatusNotification(connector.id, "Occupied", "NoError");
 
   return {
     transactionId: dev[connectorKey].transactionId,
@@ -180,7 +212,11 @@ client.handle("StopTransaction", async (payload) => {
   }
 
   dev[connectorKey].Stat = 3;
+  dev[connectorKey].status = "Available"; // Обновление статуса
   controlRelay(connector.relayPath, false);
+
+  // Отправка StatusNotification с обновленным статусом
+  await sendStatusNotification(connector.id, "Available", "NoError");
 
   return { idTagInfo: { status: "Accepted" } };
 });
