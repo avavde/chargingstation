@@ -1,0 +1,26 @@
+{
+    "centralSystemUrl": "ws://example.com:3000",
+    "stationName": "Station1",
+    "ports": [
+      {
+        "number": 1,
+        "relayPath": "/sys/class/gpio/gpio121/value",
+        "meterAddress": 1,
+        "meterRegister": 5218,
+        "currentRegister": 5220,
+        "typeNumber": 3
+      },
+      {
+        "number": 2,
+        "relayPath": "/sys/class/gpio/gpio122/value",
+        "meterAddress": 2,
+        "meterRegister": 5218,
+        "currentRegister": 5220,
+        "typeNumber": 4
+      }
+    ],
+    "modbusPort": "/dev/ttymxc4",
+    "modbusBaudRate": 9600,
+    "pricePerKwh": 5.0
+  }
+  
