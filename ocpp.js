@@ -88,7 +88,7 @@ client.on("error", (error) => {
 // Логирование всех входящих и исходящих сообщений
 client.on("message", (direction, message) => {
   try {
-    const dir = typeof direction === "string" ? direction.toUpperCase() : "НЕИЗВЕСТНОЕ_НАПРАВЛЕНИЕ";
+    const dir = typeof direction === "string" && direction ? direction.toUpperCase() : "НЕИЗВЕСТНОЕ_НАПРАВЛЕНИЕ";
     console.log(`[${new Date().toISOString()}] [${dir}]:`, JSON.stringify(message, null, 2));
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Ошибка при логировании сообщения: ${error.message}`);
@@ -163,54 +163,11 @@ client.handle("StartTransaction", async (payload) => {
   };
 });
 
-client.handle("StopTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] StopTransaction получен:`, payload);
-  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
-  const connector = config.connectors.find((c) => c.id === payload.connectorId);
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    return { idTagInfo: { status: "Rejected" } };
-  }
-
-  dev[connectorKey].Stat = 3;
-  controlRelay(connector.relayPath, false);
-
-  return { idTagInfo: { status: "Accepted" } };
-});
-
-// Обработчик данных Modbus
-async function updateModbusData() {
-  while (true) {
-    for (const connector of config.connectors) {
-      const connectorKey = `${config.stationName}_connector${connector.id}`;
-      try {
-        modbusClient.setID(connector.meterAddress);
-
-        const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
-        dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
-
-        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
-        dev[connectorKey].Current = currentData.data[0];
-
-        dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
-
-        console.log(
-          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
-        );
-      } catch (error) {
-        console.error(`[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-}
-
-// Запуск обновления Modbus
+// Запуск клиента
 (async () => {
   try {
     await client.connect();
     console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
-    updateModbusData();
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
   }
