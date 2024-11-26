@@ -35,10 +35,10 @@ modbusClient.connectRTUBuffered(
   },
   (err) => {
     if (err) {
-      console.error("Ошибка подключения к Modbus:", err.message);
+      console.error(`[${new Date().toISOString()}] Ошибка подключения к Modbus:`, err.message);
       process.exit(1);
     } else {
-      console.log("Modbus подключен.");
+      console.log(`[${new Date().toISOString()}] Modbus подключен.`);
     }
   }
 );
@@ -64,15 +64,19 @@ const client = new RPCClient({
   strictMode: true,
 });
 
-// Добавление PIN-кода в BootNotification
+// Добавление PIN-кода и информации о разъемах в BootNotification
 client.handle("BootNotification", async () => {
-  console.log("BootNotification отправлен.");
+  console.log(`[${new Date().toISOString()}] BootNotification отправлен.`);
   return {
     status: "Accepted",
     currentTime: new Date().toISOString(),
-    interval: 300, // Интервал пинга
+    interval: 300,
     additionalInfo: {
-      pinCode: config.pinCode, // Передача PIN-кода
+      pinCode: config.pinCode,
+      connectors: config.connectors.map((connector) => ({
+        id: connector.id,
+        type: connector.typeNumber,
+      })),
     },
   };
 });
@@ -81,50 +85,38 @@ client.handle("BootNotification", async () => {
 function controlRelay(path, state) {
   try {
     fs.writeFileSync(path, state ? "1" : "0");
-    console.log(`Реле ${path} установлено в состояние ${state ? "включено" : "выключено"}`);
+    console.log(`[${new Date().toISOString()}] Реле ${path} установлено в состояние ${state ? "включено" : "выключено"}`);
   } catch (error) {
-    console.error(`Ошибка управления реле ${path}: ${error.message}`);
+    console.error(`[${new Date().toISOString()}] Ошибка управления реле ${path}: ${error.message}`);
   }
 }
 
-// Логирование событий клиента
-client.on("open", () => {
-  console.log("Соединение с центральной системой установлено.");
-});
-
-client.on("close", () => {
-  console.log("Соединение с центральной системой закрыто.");
-});
-
-client.on("error", (error) => {
-  console.error("Ошибка OCPP-клиента:", error.message);
-});
-
-// Логирование всех сообщений
+// Логирование сообщений
 client.on("message", (direction, message) => {
-  console.log(`[${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
+  console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
 });
 
 // Обработчик Authorize
 client.handle("Authorize", async (payload) => {
-  console.log(`Authorize получен с ID: ${payload.idTag}`);
+  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
   return { idTagInfo: { status: "Accepted" } };
 });
 
 // Обработчик StartTransaction
 client.handle("StartTransaction", async (payload) => {
-  console.log("StartTransaction получен:", payload);
+  console.log(`[${new Date().toISOString()}] StartTransaction получен:`, payload);
   const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
   const connector = config.connectors.find((c) => c.id === payload.connectorId);
   if (!connector) {
-    console.error(`Разъем с ID ${payload.connectorId} не найден.`);
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
     return { idTagInfo: { status: "Rejected" } };
   }
 
   dev[connectorKey].Stat = 2;
   dev[connectorKey].transactionId = payload.meterStart || Date.now();
-  controlRelay(connector.relayPath, true); // Включение реле
+  controlRelay(connector.relayPath, true);
 
+  console.log(`[${new Date().toISOString()}] Зарядка начата на разъеме ${payload.connectorId}`);
   return {
     transactionId: dev[connectorKey].transactionId,
     idTagInfo: { status: "Accepted" },
@@ -133,17 +125,18 @@ client.handle("StartTransaction", async (payload) => {
 
 // Обработчик StopTransaction
 client.handle("StopTransaction", async (payload) => {
-  console.log("StopTransaction получен:", payload);
+  console.log(`[${new Date().toISOString()}] StopTransaction получен:`, payload);
   const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
   const connector = config.connectors.find((c) => c.id === payload.connectorId);
   if (!connector) {
-    console.error(`Разъем с ID ${payload.connectorId} не найден.`);
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
     return { idTagInfo: { status: "Rejected" } };
   }
 
   dev[connectorKey].Stat = 3;
-  controlRelay(connector.relayPath, false); // Выключение реле
+  controlRelay(connector.relayPath, false);
 
+  console.log(`[${new Date().toISOString()}] Зарядка остановлена на разъеме ${payload.connectorId}`);
   return {
     idTagInfo: { status: "Accepted" },
   };
@@ -151,7 +144,7 @@ client.handle("StopTransaction", async (payload) => {
 
 // Обработчик Heartbeat
 client.handle("Heartbeat", async () => {
-  console.log("Heartbeat получен.");
+  console.log(`[${new Date().toISOString()}] Heartbeat получен.`);
   return { currentTime: new Date().toISOString() };
 });
 
@@ -175,10 +168,10 @@ async function startDataUpdateLoop() {
         dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
 
         console.log(
-          `Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
+          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
         );
       } catch (error) {
-        console.error(`Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
+        console.error(`[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -189,9 +182,9 @@ async function startDataUpdateLoop() {
 (async () => {
   try {
     await client.connect();
-    console.log("OCPP-клиент запущен.");
+    console.log(`[${new Date().toISOString()}] OCPP-клиент запущен.`);
     startDataUpdateLoop();
   } catch (error) {
-    console.error("Ошибка запуска OCPP-клиента:", error.message);
+    console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
   }
 })();
