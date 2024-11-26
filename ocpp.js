@@ -319,78 +319,6 @@ async function sendStatusNotification(connectorId, status, errorCode) {
   }
 }
 
-// Остальные функции и обработчики остаются без изменений
-
-// Обработчики OCPP-сообщений от центральной системы
-client.handle("RemoteStartTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
-
-  const connectorId = payload.connectorId || 1; // Если connectorId не указан, используем 1
-  const connectorKey = `${config.stationName}_connector${connectorId}`;
-  const connector = config.connectors.find((c) => c.id === connectorId);
-
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
-    return { status: "Rejected" };
-  }
-
-  // Проверка, доступен ли разъем
-  if (dev[connectorKey].status !== "Available") {
-    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен.`);
-    return { status: "Rejected" };
-  }
-
-  // Запуск транзакции
-  dev[connectorKey].Stat = 2;
-  dev[connectorKey].transactionId = Date.now();
-  dev[connectorKey].status = "Charging";
-  controlRelay(connector.relayPath, true);
-
-  // Отправка StatusNotification с обновленным статусом
-  await sendStatusNotification(connectorId, "Occupied", "NoError");
-
-  // Отправка ответа центральной системе
-  return { status: "Accepted" };
-});
-
-// Остальные обработчики остаются без изменений
-
-// Обработчик данных Modbus
-async function updateModbusData() {
-  console.log(`[${new Date().toISOString()}] Запуск функции updateModbusData()`);
-  while (true) {
-    for (const connector of config.connectors) {
-      const connectorKey = `${config.stationName}_connector${connector.id}`;
-      try {
-        modbusClient.setID(connector.meterAddress);
-
-        const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
-        dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
-
-        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
-        dev[connectorKey].Current = currentData.data[0];
-
-        dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
-
-        console.log(
-          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${
-            dev[connectorKey].Kwt
-          } кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
-        );
-
-        // Отправка MeterValues
-        await sendMeterValues(connector.id);
-      } catch (error) {
-        console.error(
-          `[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`
-        );
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-}
-
-// Остальные функции и обработчики остаются без изменений
 
 // Функция отправки MeterValues
 async function sendMeterValues(connectorId) {
@@ -557,11 +485,128 @@ client.handle("ChangeConfiguration", async (payload) => {
   return { status };
 });
 
-// Обработчик сообщения RemoteStartTransaction
+
+// Добавляем объект для хранения бронирований
+const reservations = {};
+
+// Обработчик сообщения ReserveNow
+client.handle("ReserveNow", async (payload) => {
+  console.log(`[${new Date().toISOString()}] ReserveNow получен:`, payload);
+
+  const { connectorId, expiryDate, idTag, reservationId } = payload;
+  const connector = config.connectors.find((c) => c.id === connectorId);
+
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
+    return { status: "Rejected" };
+  }
+
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+
+  // Проверяем, доступен ли разъем
+  if (dev[connectorKey].status !== "Available") {
+    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен для бронирования.`);
+    return { status: "Occupied" };
+  }
+
+  // Создаем бронирование
+  reservations[reservationId] = {
+    connectorId,
+    expiryDate: new Date(expiryDate),
+    idTag,
+  };
+
+  // Обновляем статус разъема
+  dev[connectorKey].status = "Reserved";
+  await sendStatusNotification(connectorId, "Reserved", "NoError");
+
+  return { status: "Accepted" };
+});
+
+// Обработчик сообщения CancelReservation
+client.handle("CancelReservation", async (payload) => {
+  console.log(`[${new Date().toISOString()}] CancelReservation получен:`, payload);
+
+  const { reservationId } = payload;
+
+  if (reservations[reservationId]) {
+    const connectorId = reservations[reservationId].connectorId;
+    delete reservations[reservationId];
+
+    const connectorKey = `${config.stationName}_connector${connectorId}`;
+    dev[connectorKey].status = "Available";
+    await sendStatusNotification(connectorId, "Available", "NoError");
+
+    return { status: "Accepted" };
+  } else {
+    console.error(`[${new Date().toISOString()}] Бронирование с ID ${reservationId} не найдено.`);
+    return { status: "Rejected" };
+  }
+});
+
+// Функция для начала транзакции
+async function startTransaction(connectorId, idTag) {
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  dev[connectorKey].transactionId = Date.now();
+  dev[connectorKey].status = "Charging";
+  dev[connectorKey].idTag = idTag;
+
+  // Управляем реле для начала зарядки
+  const connector = config.connectors.find((c) => c.id === connectorId);
+  controlRelay(connector.relayPath, true);
+
+  // Отправляем StartTransaction
+  const response = await client.call("StartTransaction", {
+    connectorId,
+    idTag,
+    meterStart: Math.round(dev[connectorKey].Kwt * 1000), // Предполагаем, что значение в ватт-часах
+    timestamp: new Date().toISOString(),
+  });
+
+  dev[connectorKey].transactionId = response.transactionId;
+
+  // Отправляем StatusNotification
+  await sendStatusNotification(connectorId, "Charging", "NoError");
+}
+
+// Функция для остановки транзакции
+async function stopTransaction(connectorId) {
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  const transactionId = dev[connectorKey].transactionId;
+  const idTag = dev[connectorKey].idTag;
+
+  if (!transactionId) {
+    console.error(`[${new Date().toISOString()}] Нет активной транзакции на разъеме ${connectorId}`);
+    return;
+  }
+
+  // Управляем реле для остановки зарядки
+  const connector = config.connectors.find((c) => c.id === connectorId);
+  controlRelay(connector.relayPath, false);
+
+  // Отправляем StopTransaction
+  await client.call("StopTransaction", {
+    transactionId,
+    idTag,
+    meterStop: Math.round(dev[connectorKey].Kwt * 1000),
+    timestamp: new Date().toISOString(),
+  });
+
+  // Обновляем статус
+  dev[connectorKey].transactionId = null;
+  dev[connectorKey].status = "Available";
+
+  // Отправляем StatusNotification
+  await sendStatusNotification(connectorId, "Available", "NoError");
+}
+
+// Обновляем обработчик RemoteStartTransaction
 client.handle("RemoteStartTransaction", async (payload) => {
   console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
 
   const connectorId = payload.connectorId || 1; // Если connectorId не указан, используем 1
+  const idTag = payload.idTag || "Unknown";
+
   const connectorKey = `${config.stationName}_connector${connectorId}`;
   const connector = config.connectors.find((c) => c.id === connectorId);
 
@@ -570,30 +615,23 @@ client.handle("RemoteStartTransaction", async (payload) => {
     return { status: "Rejected" };
   }
 
-  // Проверка, доступен ли разъем и его доступность не 'Inoperative'
-  if (dev[connectorKey].status !== "Available" || dev[connectorKey].availability === "Inoperative") {
-    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен.`);
+  // Проверяем, доступен ли разъем
+  if (dev[connectorKey].status !== "Available") {
+    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен для зарядки.`);
     return { status: "Rejected" };
   }
 
-  // Запуск транзакции
-  dev[connectorKey].Stat = 2;
-  dev[connectorKey].transactionId = Date.now();
-  dev[connectorKey].status = "Charging";
-  controlRelay(connector.relayPath, true);
+  // Начинаем транзакцию
+  await startTransaction(connectorId, idTag);
 
-  // Отправка StatusNotification с обновленным статусом
-  await sendStatusNotification(connectorId, "Charging", "NoError");
-
-  // Отправка ответа центральной системе
   return { status: "Accepted" };
 });
 
-// Обработчик сообщения RemoteStopTransaction
+// Обновляем обработчик RemoteStopTransaction
 client.handle("RemoteStopTransaction", async (payload) => {
   console.log(`[${new Date().toISOString()}] RemoteStopTransaction получен:`, payload);
 
-  const transactionId = payload.transactionId;
+  const { transactionId } = payload;
   const connector = config.connectors.find(
     (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
   );
@@ -603,20 +641,83 @@ client.handle("RemoteStopTransaction", async (payload) => {
     return { status: "Rejected" };
   }
 
-  const connectorKey = `${config.stationName}_connector${connector.id}`;
+  await stopTransaction(connector.id);
 
-  // Остановка транзакции
-  dev[connectorKey].Stat = 3;
-  dev[connectorKey].status = "Available";
-  dev[connectorKey].transactionId = null;
-  controlRelay(connector.relayPath, false);
-
-  // Отправка StatusNotification с обновленным статусом
-  await sendStatusNotification(connector.id, "Available", "NoError");
-
-  // Отправка ответа центральной системе
   return { status: "Accepted" };
 });
+
+// Обработчик сообщения DataTransfer
+client.handle("DataTransfer", async (payload) => {
+  console.log(`[${new Date().toISOString()}] DataTransfer получен:`, payload);
+
+  const { vendorId, messageId, data } = payload;
+
+  // Здесь вы можете обработать пользовательские данные
+  console.log(`[${new Date().toISOString()}] DataTransfer от ${vendorId}: ${messageId}, данные: ${data}`);
+
+  return { status: "Accepted", data: "Response data" };
+});
+
+// Периодически проверяем истечение бронирований
+setInterval(async () => {
+  const now = new Date();
+  for (const reservationId in reservations) {
+    const reservation = reservations[reservationId];
+    if (now > reservation.expiryDate) {
+      console.log(`[${new Date().toISOString()}] Бронирование ${reservationId} истекло.`);
+      const connectorKey = `${config.stationName}_connector${reservation.connectorId}`;
+      dev[connectorKey].status = "Available";
+      await sendStatusNotification(reservation.connectorId, "Available", "NoError");
+      delete reservations[reservationId];
+    }
+  }
+}, 60000); // Проверяем каждую минуту
+
+// Обновляем функцию updateModbusData для обнаружения подключения автомобиля
+async function updateModbusData() {
+  console.log(`[${new Date().toISOString()}] Запуск функции updateModbusData()`);
+  while (true) {
+    for (const connector of config.connectors) {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      try {
+        modbusClient.setID(connector.meterAddress);
+
+        const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
+        dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
+
+        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
+        dev[connectorKey].Current = currentData.data[0];
+
+        dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
+
+        console.log(
+          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${
+            dev[connectorKey].Kwt
+          } кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
+        );
+
+        // Проверяем, подключен ли автомобиль (примерная логика)
+        const vehicleConnected = dev[connectorKey].Current > 0;
+
+        if (vehicleConnected && dev[connectorKey].status === "Available") {
+          // Автоматически начинаем транзакцию
+          await startTransaction(connector.id, "LocalStart");
+        } else if (!vehicleConnected && dev[connectorKey].status === "Charging") {
+          // Автоматически останавливаем транзакцию
+          await stopTransaction(connector.id);
+        }
+
+        // Отправка MeterValues
+        await sendMeterValues(connector.id);
+      } catch (error) {
+        console.error(
+          `[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`
+        );
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
 
 // Функция отправки FirmwareStatusNotification
 async function sendFirmwareStatusNotification(status) {
