@@ -73,9 +73,24 @@ console.log(`[${new Date().toISOString()}] OCPP-клиент создан с н�
 });
 
 // Логирование событий подключения
-client.on("open", () => {
+client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
-  sendStatusNotifications();
+
+  // Отправка BootNotification
+  try {
+    const bootResponse = await client.send("BootNotification", {
+      chargePointVendor: "MyVendor",
+      chargePointModel: "MyModel",
+      chargePointSerialNumber: config.stationName,
+      firmwareVersion: "1.0",
+    });
+    console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
+
+    // Отправка начальных статусов разъемов
+    sendInitialStatusNotifications();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки BootNotification: ${error.message}`);
+  }
 });
 
 client.on("close", () => {
@@ -91,17 +106,30 @@ client.on("message", (direction, message) => {
   console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
 });
 
-// Обработчик BootNotification
-client.handle("BootNotification", async () => {
-  console.log(`[${new Date().toISOString()}] BootNotification отправлен.`);
-  const payload = {
-    status: "Accepted",
-    currentTime: new Date().toISOString(),
-    interval: 300,
-  };
-  console.log(`[${new Date().toISOString()}] BootNotification payload:`, JSON.stringify(payload, null, 2));
-  return payload;
+// Обработчик Authorize
+client.handle("Authorize", async (payload) => {
+  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
+  const response = { idTagInfo: { status: "Accepted" } };
+  console.log(`[${new Date().toISOString()}] Authorize response:`, JSON.stringify(response, null, 2));
+  return response;
 });
+
+// Отправка начальных статусов разъемов
+async function sendInitialStatusNotifications() {
+  for (const connector of config.connectors) {
+    try {
+      const statusResponse = await client.send("StatusNotification", {
+        connectorId: connector.id,
+        status: "Available",
+        errorCode: "NoError",
+        timestamp: new Date().toISOString(),
+      });
+      console.log(`[${new Date().toISOString()}] StatusNotification отправлен для разъема ${connector.id}. Ответ:`, JSON.stringify(statusResponse, null, 2));
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Ошибка отправки StatusNotification для разъема ${connector.id}: ${error.message}`);
+    }
+  }
+}
 
 // Управление реле
 function controlRelay(path, state) {
@@ -113,58 +141,6 @@ function controlRelay(path, state) {
   }
 }
 
-// Обработчик Authorize
-client.handle("Authorize", async (payload) => {
-  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
-  const response = { idTagInfo: { status: "Accepted" } };
-  console.log(`[${new Date().toISOString()}] Authorize response:`, JSON.stringify(response, null, 2));
-  return response;
-});
-
-// Обработчик StartTransaction
-client.handle("StartTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] StartTransaction получен:`, payload);
-  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
-  const connector = config.connectors.find((c) => c.id === payload.connectorId);
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    const response = { idTagInfo: { status: "Rejected" } };
-    console.log(`[${new Date().toISOString()}] StartTransaction response:`, JSON.stringify(response, null, 2));
-    return response;
-  }
-
-  dev[connectorKey].Stat = 2;
-  dev[connectorKey].transactionId = payload.meterStart || Date.now();
-  controlRelay(connector.relayPath, true);
-
-  const response = {
-    transactionId: dev[connectorKey].transactionId,
-    idTagInfo: { status: "Accepted" },
-  };
-  console.log(`[${new Date().toISOString()}] StartTransaction response:`, JSON.stringify(response, null, 2));
-  return response;
-});
-
-// Обработчик StopTransaction
-client.handle("StopTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] StopTransaction получен:`, payload);
-  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
-  const connector = config.connectors.find((c) => c.id === payload.connectorId);
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    const response = { idTagInfo: { status: "Rejected" } };
-    console.log(`[${new Date().toISOString()}] StopTransaction response:`, JSON.stringify(response, null, 2));
-    return response;
-  }
-
-  dev[connectorKey].Stat = 3;
-  controlRelay(connector.relayPath, false);
-
-  const response = { idTagInfo: { status: "Accepted" } };
-  console.log(`[${new Date().toISOString()}] StopTransaction response:`, JSON.stringify(response, null, 2));
-  return response;
-});
-
 // Обработчик Heartbeat
 client.handle("Heartbeat", async () => {
   console.log(`[${new Date().toISOString()}] Heartbeat получен.`);
@@ -172,30 +148,6 @@ client.handle("Heartbeat", async () => {
   console.log(`[${new Date().toISOString()}] Heartbeat response:`, JSON.stringify(response, null, 2));
   return response;
 });
-
-// Отправка статусов разъемов
-async function sendStatusNotifications() {
-  for (const connector of config.connectors) {
-    const connectorKey = `${config.stationName}_connector${connector.id}`;
-    try {
-      await client.send("StatusNotification", {
-        connectorId: connector.id,
-        status: dev[connectorKey].Stat === 2 ? "Charging" : "Available",
-        errorCode: "NoError",
-        timestamp: new Date().toISOString(),
-      });
-      console.log(
-        `[${new Date().toISOString()}] StatusNotification отправлен для разъема ${connector.id}: Статус ${
-          dev[connectorKey].Stat === 2 ? "Charging" : "Available"
-        }`
-      );
-    } catch (error) {
-      console.error(
-        `[${new Date().toISOString()}] Ошибка отправки StatusNotification для разъема ${connector.id}: ${error.message}`
-      );
-    }
-  }
-}
 
 // Цикл обновления данных Modbus
 async function startDataUpdateLoop() {
