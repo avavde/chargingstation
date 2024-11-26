@@ -64,6 +64,19 @@ const client = new RPCClient({
   strictMode: true,
 });
 
+// Добавление PIN-кода в BootNotification
+client.handle("BootNotification", async () => {
+  console.log("BootNotification отправлен.");
+  return {
+    status: "Accepted",
+    currentTime: new Date().toISOString(),
+    interval: 300, // Интервал пинга
+    additionalInfo: {
+      pinCode: config.pinCode, // Передача PIN-кода
+    },
+  };
+});
+
 // Управление реле
 function controlRelay(path, state) {
   try {
@@ -90,16 +103,6 @@ client.on("error", (error) => {
 // Логирование всех сообщений
 client.on("message", (direction, message) => {
   console.log(`[${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
-});
-
-// Обработчик BootNotification
-client.handle("BootNotification", async () => {
-  console.log("BootNotification отправлен.");
-  return {
-    status: "Accepted",
-    currentTime: new Date().toISOString(),
-    interval: 300, // Интервал пинга
-  };
 });
 
 // Обработчик Authorize
