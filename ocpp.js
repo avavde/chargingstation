@@ -7,7 +7,7 @@ const configPath = "./config/ocpp_config.json";
 
 // Проверка конфигурационного файла
 if (!fs.existsSync(configPath)) {
-  console.error(`Файл конфигурации не найден: ${configPath}`);
+  console.error(`[${new Date().toISOString()}] Файл конфигурации не найден: ${configPath}`);
   process.exit(1);
 }
 
@@ -15,8 +15,9 @@ if (!fs.existsSync(configPath)) {
 let config;
 try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  console.log(`[${new Date().toISOString()}] Конфигурация загружена:`, JSON.stringify(config, null, 2));
 } catch (error) {
-  console.error("Ошибка чтения конфигурации:", error.message);
+  console.error(`[${new Date().toISOString()}] Ошибка чтения конфигурации: ${error.message}`);
   process.exit(1);
 }
 
@@ -35,7 +36,7 @@ modbusClient.connectRTUBuffered(
   },
   (err) => {
     if (err) {
-      console.error(`[${new Date().toISOString()}] Ошибка подключения к Modbus:`, err.message);
+      console.error(`[${new Date().toISOString()}] Ошибка подключения к Modbus: ${err.message}`);
       process.exit(1);
     } else {
       console.log(`[${new Date().toISOString()}] Modbus подключен.`);
@@ -54,6 +55,7 @@ config.connectors.forEach((connector) => {
     Current: 0,
     transactionId: null,
   };
+  console.log(`[${new Date().toISOString()}] Разъем ${connector.id} инициализирован:`, dev[connectorKey]);
 });
 
 // Создание OCPP-клиента
@@ -64,10 +66,34 @@ const client = new RPCClient({
   strictMode: true,
 });
 
-// Добавление PIN-кода и информации о разъемах в BootNotification
+console.log(`[${new Date().toISOString()}] OCPP-клиент создан с настройками:`, {
+  endpoint: config.centralSystemUrl,
+  identity: config.stationName,
+  protocols: ["ocpp1.6"],
+});
+
+// Логирование событий подключения
+client.on("open", () => {
+  console.log(`[${new Date().toISOString()}] Соединение с центральной системой установлено.`);
+});
+
+client.on("close", () => {
+  console.log(`[${new Date().toISOString()}] Соединение с центральной системой закрыто.`);
+});
+
+client.on("error", (error) => {
+  console.error(`[${new Date().toISOString()}] Ошибка OCPP-клиента: ${error.message}`);
+});
+
+// Логирование всех входящих и исходящих сообщений
+client.on("message", (direction, message) => {
+  console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
+});
+
+// Добавление PIN-кода и разъемов в BootNotification
 client.handle("BootNotification", async () => {
   console.log(`[${new Date().toISOString()}] BootNotification отправлен.`);
-  return {
+  const payload = {
     status: "Accepted",
     currentTime: new Date().toISOString(),
     interval: 300,
@@ -79,6 +105,8 @@ client.handle("BootNotification", async () => {
       })),
     },
   };
+  console.log(`[${new Date().toISOString()}] BootNotification payload:`, JSON.stringify(payload, null, 2));
+  return payload;
 });
 
 // Управление реле
@@ -91,15 +119,12 @@ function controlRelay(path, state) {
   }
 }
 
-// Логирование сообщений
-client.on("message", (direction, message) => {
-  console.log(`[${new Date().toISOString()}] [${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
-});
-
 // Обработчик Authorize
 client.handle("Authorize", async (payload) => {
   console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
-  return { idTagInfo: { status: "Accepted" } };
+  const response = { idTagInfo: { status: "Accepted" } };
+  console.log(`[${new Date().toISOString()}] Authorize response:`, JSON.stringify(response, null, 2));
+  return response;
 });
 
 // Обработчик StartTransaction
@@ -109,18 +134,21 @@ client.handle("StartTransaction", async (payload) => {
   const connector = config.connectors.find((c) => c.id === payload.connectorId);
   if (!connector) {
     console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    return { idTagInfo: { status: "Rejected" } };
+    const response = { idTagInfo: { status: "Rejected" } };
+    console.log(`[${new Date().toISOString()}] StartTransaction response:`, JSON.stringify(response, null, 2));
+    return response;
   }
 
   dev[connectorKey].Stat = 2;
   dev[connectorKey].transactionId = payload.meterStart || Date.now();
   controlRelay(connector.relayPath, true);
 
-  console.log(`[${new Date().toISOString()}] Зарядка начата на разъеме ${payload.connectorId}`);
-  return {
+  const response = {
     transactionId: dev[connectorKey].transactionId,
     idTagInfo: { status: "Accepted" },
   };
+  console.log(`[${new Date().toISOString()}] StartTransaction response:`, JSON.stringify(response, null, 2));
+  return response;
 });
 
 // Обработчик StopTransaction
@@ -130,22 +158,25 @@ client.handle("StopTransaction", async (payload) => {
   const connector = config.connectors.find((c) => c.id === payload.connectorId);
   if (!connector) {
     console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    return { idTagInfo: { status: "Rejected" } };
+    const response = { idTagInfo: { status: "Rejected" } };
+    console.log(`[${new Date().toISOString()}] StopTransaction response:`, JSON.stringify(response, null, 2));
+    return response;
   }
 
   dev[connectorKey].Stat = 3;
   controlRelay(connector.relayPath, false);
 
-  console.log(`[${new Date().toISOString()}] Зарядка остановлена на разъеме ${payload.connectorId}`);
-  return {
-    idTagInfo: { status: "Accepted" },
-  };
+  const response = { idTagInfo: { status: "Accepted" } };
+  console.log(`[${new Date().toISOString()}] StopTransaction response:`, JSON.stringify(response, null, 2));
+  return response;
 });
 
 // Обработчик Heartbeat
 client.handle("Heartbeat", async () => {
   console.log(`[${new Date().toISOString()}] Heartbeat получен.`);
-  return { currentTime: new Date().toISOString() };
+  const response = { currentTime: new Date().toISOString() };
+  console.log(`[${new Date().toISOString()}] Heartbeat response:`, JSON.stringify(response, null, 2));
+  return response;
 });
 
 // Цикл обновления данных Modbus
@@ -181,6 +212,7 @@ async function startDataUpdateLoop() {
 // Запуск OCPP-клиента и цикла обновления
 (async () => {
   try {
+    console.log(`[${new Date().toISOString()}] Подключение к центральной системе...`);
     await client.connect();
     console.log(`[${new Date().toISOString()}] OCPP-клиент запущен.`);
     startDataUpdateLoop();
