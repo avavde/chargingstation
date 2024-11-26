@@ -1,5 +1,5 @@
 {
-    "centralSystemUrl": "ws://example.com:3000",
+    "centralSystemUrl": "ws://www.ecarup.com/api/Ocpp16/110D687EEDFDAE52",
     "stationName": "Station1",
     "ports": [
       {
