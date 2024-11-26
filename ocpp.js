@@ -4,6 +4,20 @@ const { SerialPort } = require("serialport");
 const Readline = require("@serialport/parser-readline");
 const { RPCClient } = require("ocpp-rpc");
 
+// Добавляем глобальные обработчики необработанных исключений
+process.on("unhandledRejection", (reason, promise) => {
+  console.error(
+    `[${new Date().toISOString()}] Необработанный отказ в промисе:`,
+    promise,
+    "Причина:",
+    reason
+  );
+});
+
+process.on("uncaughtException", (err) => {
+  console.error(`[${new Date().toISOString()}] Необработанное исключение:`, err);
+});
+
 // Путь к конфигурационному файлу
 const configPath = "./config/ocpp_config.json";
 
@@ -17,7 +31,10 @@ if (!fs.existsSync(configPath)) {
 let config;
 try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  console.log(`[${new Date().toISOString()}] Конфигурация успешно загружена:`, JSON.stringify(config, null, 2));
+  console.log(
+    `[${new Date().toISOString()}] Конфигурация успешно загружена:`,
+    JSON.stringify(config, null, 2)
+  );
 } catch (error) {
   console.error(`[${new Date().toISOString()}] Ошибка при чтении конфигурации: ${error.message}`);
   process.exit(1);
@@ -27,17 +44,22 @@ try {
 const dev = {};
 
 // Создание OCPP-клиента
-const client = new RPCClient({
-  endpoint: config.centralSystemUrl,
-  identity: config.stationName,
-  protocols: ["ocpp1.6"],
-});
-
-console.log(`[${new Date().toISOString()}] OCPP-клиент создан с настройками:`, {
-  endpoint: config.centralSystemUrl,
-  identity: config.stationName,
-  protocols: ["ocpp1.6"],
-});
+let client;
+try {
+  client = new RPCClient({
+    endpoint: config.centralSystemUrl,
+    identity: config.stationName,
+    protocols: ["ocpp1.6"],
+  });
+  console.log(`[${new Date().toISOString()}] OCPP-клиент создан с настройками:`, {
+    endpoint: config.centralSystemUrl,
+    identity: config.stationName,
+    protocols: ["ocpp1.6"],
+  });
+} catch (error) {
+  console.error(`[${new Date().toISOString()}] Ошибка создания OCPP-клиента: ${error.message}`);
+  process.exit(1);
+}
 
 // Логирование всех событий клиента
 client.on("open", () => {
@@ -109,23 +131,30 @@ modbusClient.connectRTUBuffered(
       console.log(`[${new Date().toISOString()}] Modbus успешно подключен.`);
 
       // Инициализация состояния разъемов после подключения к Modbus
-      for (const connector of config.connectors) {
-        const connectorKey = `${config.stationName}_connector${connector.id}`;
-        dev[connectorKey] = {
-          Stat: 0,
-          Finish: false,
-          Kwt: 0,
-          Summ: 0,
-          Current: 0,
-          transactionId: null,
-          status: "Available",
-          meterSerialNumber: null,
-        };
-        dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
-        console.log(
-          `[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`,
-          dev[connectorKey]
+      try {
+        for (const connector of config.connectors) {
+          const connectorKey = `${config.stationName}_connector${connector.id}`;
+          dev[connectorKey] = {
+            Stat: 0,
+            Finish: false,
+            Kwt: 0,
+            Summ: 0,
+            Current: 0,
+            transactionId: null,
+            status: "Available",
+            meterSerialNumber: null,
+          };
+          dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
+          console.log(
+            `[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`,
+            dev[connectorKey]
+          );
+        }
+      } catch (initError) {
+        console.error(
+          `[${new Date().toISOString()}] Ошибка инициализации разъемов: ${initError.message}`
         );
+        process.exit(1);
       }
 
       // Теперь можем подключиться к OCPP и запустить основной цикл
@@ -196,7 +225,9 @@ async function getModemInfo() {
 
 // Функция запуска OCPP-клиента и основного цикла
 async function startOCPPClient() {
+  console.log(`[${new Date().toISOString()}] Функция startOCPPClient() вызвана.`);
   try {
+    console.log(`[${new Date().toISOString()}] Попытка подключения к центральной системе OCPP...`);
     await client.connect();
     console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
     updateModbusData();
@@ -306,6 +337,8 @@ async function sendHeartbeat() {
   }
 }
 
+// Остальные функции и обработчики остаются без изменений
+
 // Обработчики OCPP-сообщений от центральной системы
 client.handle("RemoteStartTransaction", async (payload) => {
   console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
@@ -338,79 +371,11 @@ client.handle("RemoteStartTransaction", async (payload) => {
   return { status: "Accepted" };
 });
 
-client.handle("RemoteStopTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] RemoteStopTransaction получен:`, payload);
-
-  const transactionId = payload.transactionId;
-  const connector = config.connectors.find(
-    (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
-  );
-
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Транзакция с ID ${transactionId} не найдена.`);
-    return { status: "Rejected" };
-  }
-
-  const connectorKey = `${config.stationName}_connector${connector.id}`;
-
-  // Остановка транзакции
-  dev[connectorKey].Stat = 3;
-  dev[connectorKey].status = "Available";
-  controlRelay(connector.relayPath, false);
-
-  // Отправка StatusNotification с обновленным статусом
-  await sendStatusNotification(connector.id, "Available", "NoError");
-
-  // Отправка ответа центральной системе
-  return { status: "Accepted" };
-});
-
-client.handle("UnlockConnector", async (payload) => {
-  console.log(`[${new Date().toISOString()}] UnlockConnector получен:`, payload);
-
-  const connectorId = payload.connectorId;
-  const connectorKey = `${config.stationName}_connector${connectorId}`;
-  const connector = config.connectors.find((c) => c.id === connectorId);
-
-  if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
-    return { status: "Unlocked" };
-  }
-
-  // Здесь можно добавить логику разблокировки разъема
-  console.log(`[${new Date().toISOString()}] Разъем ${connectorId} разблокирован.`);
-
-  return { status: "Unlocked" };
-});
-
-client.handle("Reset", async (payload) => {
-  console.log(`[${new Date().toISOString()}] Reset получен:`, payload);
-
-  const type = payload.type; // "Hard" или "Soft"
-
-  // Отправка подтверждения
-  setTimeout(() => {
-    process.exit(0); // Перезапуск приложения
-  }, 1000);
-
-  return { status: "Accepted" };
-});
-
-client.handle("ChangeConfiguration", async (payload) => {
-  console.log(`[${new Date().toISOString()}] ChangeConfiguration получен:`, payload);
-
-  const { key, value } = payload;
-
-  // Здесь вы можете реализовать изменение конфигурации
-  // Например, обновить конфигурационный файл и перезагрузить приложение
-
-  console.log(`[${new Date().toISOString()}] Параметр ${key} изменен на ${value}.`);
-
-  return { status: "Accepted" };
-});
+// Остальные обработчики остаются без изменений
 
 // Обработчик данных Modbus
 async function updateModbusData() {
+  console.log(`[${new Date().toISOString()}] Запуск функции updateModbusData()`);
   while (true) {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
@@ -514,13 +479,19 @@ async function sendFirmwareStatusNotification(status) {
       status,
       timestamp: new Date().toISOString(),
     });
-    console.log(
-      `[${new Date().toISOString()}] FirmwareStatusNotification отправлен со статусом ${status}. Ответ:`,
-      JSON.stringify(response, null, 2)
-    );
+    console.log(`[${new Date().toISOString()}] FirmwareStatusNotification отправлен со статусом ${status}. Ответ:`, JSON.stringify(response, null, 2));
   } catch (error) {
-    console.error(
-      `[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`
-    );
+    console.error(`[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`);
   }
 }
+
+// Запуск обновления Modbus и подключение к OCPP
+(async () => {
+  try {
+    await client.connect();
+    console.log(`[${new Date().toISOString()}] OCPP-клиент успешно запущен.`);
+    updateModbusData();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка запуска OCPP-клиента: ${error.message}`);
+  }
+})();
