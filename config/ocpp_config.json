@@ -1,6 +1,6 @@
 {
     "centralSystemUrl": "ws://www.ecarup.com/api/Ocpp16/110D687EEDFDAE52",
-    "stationName": "Station1",
+    "stationName": "110D687EEDFDAE52",
     "ports": [
       {
         "number": 1,
