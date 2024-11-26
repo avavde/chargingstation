@@ -43,10 +43,10 @@ modbusClient.connectRTUBuffered(
   }
 );
 
-// Инициализация состояния портов
-config.ports.forEach((port) => {
-  const portKey = `${config.stationName}_port${port.number}`;
-  dev[portKey] = {
+// Инициализация состояния разъемов
+config.connectors.forEach((connector) => {
+  const connectorKey = `${config.stationName}_connector${connector.id}`;
+  dev[connectorKey] = {
     Stat: 0,
     Finish: false,
     Kwt: 0,
@@ -114,19 +114,19 @@ client.handle("Authorize", async (payload) => {
 // Обработчик StartTransaction
 client.handle("StartTransaction", async (payload) => {
   console.log("StartTransaction получен:", payload);
-  const portKey = `${config.stationName}_port${payload.connectorId}`;
-  const port = config.ports.find((p) => p.number === payload.connectorId);
-  if (!port) {
-    console.error(`Порт с ID ${payload.connectorId} не найден.`);
+  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
+  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+  if (!connector) {
+    console.error(`Разъем с ID ${payload.connectorId} не найден.`);
     return { idTagInfo: { status: "Rejected" } };
   }
 
-  dev[portKey].Stat = 2;
-  dev[portKey].transactionId = payload.meterStart || Date.now();
-  controlRelay(port.relayPath, true); // Включение реле
+  dev[connectorKey].Stat = 2;
+  dev[connectorKey].transactionId = payload.meterStart || Date.now();
+  controlRelay(connector.relayPath, true); // Включение реле
 
   return {
-    transactionId: dev[portKey].transactionId,
+    transactionId: dev[connectorKey].transactionId,
     idTagInfo: { status: "Accepted" },
   };
 });
@@ -134,15 +134,15 @@ client.handle("StartTransaction", async (payload) => {
 // Обработчик StopTransaction
 client.handle("StopTransaction", async (payload) => {
   console.log("StopTransaction получен:", payload);
-  const portKey = `${config.stationName}_port${payload.connectorId}`;
-  const port = config.ports.find((p) => p.number === payload.connectorId);
-  if (!port) {
-    console.error(`Порт с ID ${payload.connectorId} не найден.`);
+  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
+  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+  if (!connector) {
+    console.error(`Разъем с ID ${payload.connectorId} не найден.`);
     return { idTagInfo: { status: "Rejected" } };
   }
 
-  dev[portKey].Stat = 3;
-  controlRelay(port.relayPath, false); // Выключение реле
+  dev[connectorKey].Stat = 3;
+  controlRelay(connector.relayPath, false); // Выключение реле
 
   return {
     idTagInfo: { status: "Accepted" },
@@ -158,27 +158,27 @@ client.handle("Heartbeat", async () => {
 // Цикл обновления данных Modbus
 async function startDataUpdateLoop() {
   while (true) {
-    for (const port of config.ports) {
-      const portKey = `${config.stationName}_port${port.number}`;
+    for (const connector of config.connectors) {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
       try {
-        modbusClient.setID(port.meterAddress);
+        modbusClient.setID(connector.meterAddress);
 
         // Чтение энергии
-        const energyData = await modbusClient.readHoldingRegisters(port.meterRegister, 2);
-        dev[portKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
+        const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
+        dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
 
         // Чтение тока
-        const currentData = await modbusClient.readHoldingRegisters(port.currentRegister, 1);
-        dev[portKey].Current = currentData.data[0];
+        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
+        dev[connectorKey].Current = currentData.data[0];
 
         // Обновление суммы
-        dev[portKey].Summ = dev[portKey].Kwt * config.pricePerKwh;
+        dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
 
         console.log(
-          `Порт: ${port.number}, Энергия: ${dev[portKey].Kwt} кВт·ч, Ток: ${dev[portKey].Current} А, Сумма: ${dev[portKey].Summ} руб.`
+          `Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
         );
       } catch (error) {
-        console.error(`Ошибка обновления данных порта ${port.number}: ${error.message}`);
+        console.error(`Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));

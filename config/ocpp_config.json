@@ -2,9 +2,9 @@
   "centralSystemUrl": "wss://hub.volttime.com",
   "stationName": "cs1",
   "pinCode": "4294",
-  "ports": [
+  "connectors": [
     {
-      "number": 1,
+      "id": 1,
       "relayPath": "/sys/class/gpio/gpio121/value",
       "meterAddress": 1,
       "meterRegister": 5218,
@@ -12,7 +12,7 @@
       "typeNumber": 3
     },
     {
-      "number": 2,
+      "id": 2,
       "relayPath": "/sys/class/gpio/gpio122/value",
       "meterAddress": 2,
       "meterRegister": 5218,
