@@ -54,7 +54,7 @@ config.connectors.forEach((connector) => {
     Summ: 0,
     Current: 0,
     transactionId: null,
-    status: "Available", // Добавлено поле статуса
+    status: "Available",
   };
   console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
 });
@@ -118,8 +118,8 @@ client.on("open", async () => {
   console.log(`[${new Date().toISOString()}] Отправка BootNotification...`);
   try {
     const bootResponse = await client.call("BootNotification", {
-      chargePointVendor: "MyVendor",
-      chargePointModel: "MyModel",
+      chargePointVendor: config.vendor,
+      chargePointModel: config.model,
       chargePointSerialNumber: config.stationName,
       firmwareVersion: "1.0",
     });
@@ -173,52 +173,105 @@ async function sendHeartbeat() {
   }
 }
 
-// Обработчики OCPP-сообщений
-client.handle("Authorize", async (payload) => {
-  console.log(`[${new Date().toISOString()}] Authorize получен с ID: ${payload.idTag}`);
-  return { idTagInfo: { status: "Accepted" } };
-});
+// Обработчики OCPP-сообщений от центральной системы
+client.handle("RemoteStartTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
 
-client.handle("StartTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] StartTransaction получен:`, payload);
-  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
-  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+  const connectorId = payload.connectorId || 1; // Если connectorId не указан, использовать 1
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  const connector = config.connectors.find((c) => c.id === connectorId);
+
   if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    return { idTagInfo: { status: "Rejected" } };
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
+    return { status: "Rejected" };
   }
 
+  // Проверка, доступен ли разъем
+  if (dev[connectorKey].status !== "Available") {
+    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен.`);
+    return { status: "Rejected" };
+  }
+
+  // Запуск транзакции
   dev[connectorKey].Stat = 2;
-  dev[connectorKey].transactionId = payload.meterStart || Date.now();
-  dev[connectorKey].status = "Charging"; // Обновление статуса
+  dev[connectorKey].transactionId = Date.now();
+  dev[connectorKey].status = "Charging";
   controlRelay(connector.relayPath, true);
 
   // Отправка StatusNotification с обновленным статусом
-  await sendStatusNotification(connector.id, "Occupied", "NoError");
+  await sendStatusNotification(connectorId, "Occupied", "NoError");
 
-  return {
-    transactionId: dev[connectorKey].transactionId,
-    idTagInfo: { status: "Accepted" },
-  };
+  // Отправка ответа центральной системе
+  return { status: "Accepted" };
 });
 
-client.handle("StopTransaction", async (payload) => {
-  console.log(`[${new Date().toISOString()}] StopTransaction получен:`, payload);
-  const connectorKey = `${config.stationName}_connector${payload.connectorId}`;
-  const connector = config.connectors.find((c) => c.id === payload.connectorId);
+client.handle("RemoteStopTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] RemoteStopTransaction получен:`, payload);
+
+  const transactionId = payload.transactionId;
+  const connector = config.connectors.find((c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId);
+
   if (!connector) {
-    console.error(`[${new Date().toISOString()}] Разъем с ID ${payload.connectorId} не найден.`);
-    return { idTagInfo: { status: "Rejected" } };
+    console.error(`[${new Date().toISOString()}] Транзакция с ID ${transactionId} не найдена.`);
+    return { status: "Rejected" };
   }
 
+  const connectorKey = `${config.stationName}_connector${connector.id}`;
+
+  // Остановка транзакции
   dev[connectorKey].Stat = 3;
-  dev[connectorKey].status = "Available"; // Обновление статуса
+  dev[connectorKey].status = "Available";
   controlRelay(connector.relayPath, false);
 
   // Отправка StatusNotification с обновленным статусом
   await sendStatusNotification(connector.id, "Available", "NoError");
 
-  return { idTagInfo: { status: "Accepted" } };
+  // Отправка ответа центральной системе
+  return { status: "Accepted" };
+});
+
+client.handle("UnlockConnector", async (payload) => {
+  console.log(`[${new Date().toISOString()}] UnlockConnector получен:`, payload);
+
+  const connectorId = payload.connectorId;
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  const connector = config.connectors.find((c) => c.id === connectorId);
+
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
+    return { status: "Unlocked" };
+  }
+
+  // Здесь можно добавить логику разблокировки разъема
+  console.log(`[${new Date().toISOString()}] Разъем ${connectorId} разблокирован.`);
+
+  return { status: "Unlocked" };
+});
+
+client.handle("Reset", async (payload) => {
+  console.log(`[${new Date().toISOString()}] Reset получен:`, payload);
+
+  const type = payload.type; // "Hard" или "Soft"
+
+  // Отправка подтверждения
+  setTimeout(() => {
+    process.exit(0); // Перезапуск приложения
+  }, 1000);
+
+  return { status: "Accepted" };
+});
+
+client.handle("ChangeConfiguration", async (payload) => {
+  console.log(`[${new Date().toISOString()}] ChangeConfiguration получен:`, payload);
+
+  const { key, value } = payload;
+
+  // Здесь вы можете реализовать изменение конфигурации
+  // Например, обновить конфигурационный файл и перезагрузить приложение
+
+  console.log(`[${new Date().toISOString()}] Параметр ${key} изменен на ${value}.`);
+
+  return { status: "Accepted" };
 });
 
 // Обработчик данных Modbus
@@ -248,7 +301,48 @@ async function updateModbusData() {
   }
 }
 
-// Запуск обновления Modbus
+// Обработка команды UpdateFirmware
+client.handle("UpdateFirmware", async (payload) => {
+  console.log(`[${new Date().toISOString()}] UpdateFirmware получен:`, payload);
+
+  // Здесь вы можете реализовать логику загрузки и обновления ПО
+  // Например, загрузить файл по URL и запустить процесс обновления
+
+  // Для простоты, мы имитируем успешное начало обновления
+  setTimeout(async () => {
+    // Отправляем FirmwareStatusNotification со статусом "Downloading"
+    await sendFirmwareStatusNotification("Downloading");
+
+    // Имитация загрузки и обновления
+    setTimeout(async () => {
+      // Отправляем FirmwareStatusNotification со статусом "Installation"
+      await sendFirmwareStatusNotification("Installing");
+
+      // Имитация завершения обновления
+      setTimeout(async () => {
+        // Отправляем FirmwareStatusNotification со статусом "Installed"
+        await sendFirmwareStatusNotification("Installed");
+      }, 5000);
+    }, 5000);
+  }, 1000);
+
+  return {};
+});
+
+// Функция отправки FirmwareStatusNotification
+async function sendFirmwareStatusNotification(status) {
+  try {
+    const response = await client.call("FirmwareStatusNotification", {
+      status,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`[${new Date().toISOString()}] FirmwareStatusNotification отправлен со статусом ${status}. Ответ:`, JSON.stringify(response, null, 2));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`);
+  }
+}
+
+// Запуск обновления Modbus и подключение к OCPP
 (async () => {
   try {
     await client.connect();

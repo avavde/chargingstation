@@ -1,6 +1,8 @@
 {
   "centralSystemUrl": "wss://hub.volttime.com",
   "stationName": "cs1",
+  "vendor": "Electricus",
+  "model": "Frankenstein",
   "pinCode": "4294",
   "connectors": [
     {
