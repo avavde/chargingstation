@@ -1,18 +1,17 @@
 const fs = require("fs");
-const path = require("path");
 const ModbusRTU = require("modbus-serial");
 const { RPCClient } = require("ocpp-rpc");
 
 // Путь к конфигурационному файлу
 const configPath = "./config/ocpp_config.json";
 
-// Проверяем наличие файла конфигурации
+// Проверка конфигурационного файла
 if (!fs.existsSync(configPath)) {
   console.error(`Файл конфигурации не найден: ${configPath}`);
   process.exit(1);
 }
 
-// Загружаем конфигурацию
+// Загрузка конфигурации
 let config;
 try {
   config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -27,21 +26,25 @@ const dev = {};
 
 // Подключение к Modbus
 const modbusClient = new ModbusRTU();
-modbusClient.connectRTUBuffered(config.modbusPort, {
-  baudRate: config.modbusBaudRate,
-  dataBits: 8,
-  stopBits: 2,
-  parity: "none",
-}, (err) => {
-  if (err) {
-    console.error("Ошибка подключения к Modbus:", err.message);
-    process.exit(1);
-  } else {
-    console.log("Modbus подключен.");
+modbusClient.connectRTUBuffered(
+  config.modbusPort,
+  {
+    baudRate: config.modbusBaudRate,
+    dataBits: 8,
+    stopBits: 2,
+    parity: "none",
+  },
+  (err) => {
+    if (err) {
+      console.error("Ошибка подключения к Modbus:", err.message);
+      process.exit(1);
+    } else {
+      console.log("Modbus подключен.");
+    }
   }
-});
+);
 
-// Настройка порта
+// Инициализация состояния портов
 config.ports.forEach((port) => {
   const portKey = `${config.stationName}_port${port.number}`;
   dev[portKey] = {
@@ -54,7 +57,7 @@ config.ports.forEach((port) => {
   };
 });
 
-// Создание клиента OCPP
+// Создание OCPP-клиента
 const client = new RPCClient({
   endpoint: config.centralSystemUrl,
   identity: config.stationName,
@@ -62,55 +65,7 @@ const client = new RPCClient({
   strictMode: true,
 });
 
-// Обработчик BootNotification
-client.handle("BootNotification", async () => {
-  console.log("BootNotification received");
-  return {
-    status: "Accepted",
-    currentTime: new Date().toISOString(),
-    interval: 300,
-  };
-});
-
-// Обработчик Authorize
-client.handle("Authorize", async () => {
-  console.log("Authorize received");
-  return { idTagInfo: { status: "Accepted" } };
-});
-
-// Обработчик StartTransaction
-client.handle("StartTransaction", async (params) => {
-  console.log("StartTransaction received:", params);
-  const portKey = `${config.stationName}_port${params.connectorId}`;
-  if (!dev[portKey]) {
-    return { idTagInfo: { status: "Rejected" } };
-  }
-
-  dev[portKey].Stat = 2;
-  dev[portKey].transactionId = params.meterStart;
-  controlRelay(config.ports[params.connectorId - 1].relayPath, true);
-
-  return {
-    transactionId: dev[portKey].transactionId,
-    idTagInfo: { status: "Accepted" },
-  };
-});
-
-// Обработчик StopTransaction
-client.handle("StopTransaction", async (params) => {
-  console.log("StopTransaction received:", params);
-  const portKey = `${config.stationName}_port${params.connectorId}`;
-  if (!dev[portKey]) {
-    return { idTagInfo: { status: "Rejected" } };
-  }
-
-  dev[portKey].Stat = 3;
-  controlRelay(config.ports[params.connectorId - 1].relayPath, false);
-
-  return { idTagInfo: { status: "Accepted" } };
-});
-
-// Функция управления реле
+// Управление реле
 function controlRelay(path, state) {
   try {
     fs.writeFileSync(path, state ? "1" : "0");
@@ -119,6 +74,79 @@ function controlRelay(path, state) {
     console.error(`Ошибка управления реле ${path}: ${error.message}`);
   }
 }
+
+// Логирование событий клиента
+client.on("open", () => {
+  console.log("Соединение с центральной системой установлено.");
+});
+
+client.on("close", () => {
+  console.log("Соединение с центральной системой закрыто.");
+});
+
+client.on("error", (error) => {
+  console.error("Ошибка OCPP-клиента:", error.message);
+});
+
+// Обработчик BootNotification
+client.handle("BootNotification", async () => {
+  console.log("BootNotification отправлен.");
+  return {
+    status: "Accepted",
+    currentTime: new Date().toISOString(),
+    interval: 300, // Интервал пинга
+  };
+});
+
+// Обработчик Authorize
+client.handle("Authorize", async (payload) => {
+  console.log(`Authorize получен с ID: ${payload.idTag}`);
+  return { idTagInfo: { status: "Accepted" } };
+});
+
+// Обработчик StartTransaction
+client.handle("StartTransaction", async (payload) => {
+  console.log("StartTransaction получен:", payload);
+  const portKey = `${config.stationName}_port${payload.connectorId}`;
+  const port = config.ports.find((p) => p.number === payload.connectorId);
+  if (!port) {
+    console.error(`Порт с ID ${payload.connectorId} не найден.`);
+    return { idTagInfo: { status: "Rejected" } };
+  }
+
+  dev[portKey].Stat = 2;
+  dev[portKey].transactionId = payload.meterStart || Date.now();
+  controlRelay(port.relayPath, true); // Включение реле
+
+  return {
+    transactionId: dev[portKey].transactionId,
+    idTagInfo: { status: "Accepted" },
+  };
+});
+
+// Обработчик StopTransaction
+client.handle("StopTransaction", async (payload) => {
+  console.log("StopTransaction получен:", payload);
+  const portKey = `${config.stationName}_port${payload.connectorId}`;
+  const port = config.ports.find((p) => p.number === payload.connectorId);
+  if (!port) {
+    console.error(`Порт с ID ${payload.connectorId} не найден.`);
+    return { idTagInfo: { status: "Rejected" } };
+  }
+
+  dev[portKey].Stat = 3;
+  controlRelay(port.relayPath, false); // Выключение реле
+
+  return {
+    idTagInfo: { status: "Accepted" },
+  };
+});
+
+// Обработчик Heartbeat
+client.handle("Heartbeat", async () => {
+  console.log("Heartbeat получен.");
+  return { currentTime: new Date().toISOString() };
+});
 
 // Цикл обновления данных Modbus
 async function startDataUpdateLoop() {
@@ -150,13 +178,13 @@ async function startDataUpdateLoop() {
   }
 }
 
-// Запуск клиента OCPP и цикла обновления
+// Запуск OCPP-клиента и цикла обновления
 (async () => {
   try {
     await client.connect();
-    console.log("OCPP клиент подключен.");
+    console.log("OCPP-клиент запущен.");
     startDataUpdateLoop();
   } catch (error) {
-    console.error("Ошибка подключения OCPP клиента:", error.message);
+    console.error("Ошибка запуска OCPP-клиента:", error.message);
   }
 })();
