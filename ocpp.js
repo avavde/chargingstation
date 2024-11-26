@@ -455,6 +455,168 @@ client.handle("UpdateFirmware", async (payload) => {
 
   return {};
 });
+client.handle("GetConfiguration", async (payload) => {
+  console.log(`[${new Date().toISOString()}] GetConfiguration получен:`, payload);
+
+  const { key } = payload;
+  const configurationKey = [];
+  const unknownKey = [];
+
+  // Если ключи не указаны, возвращаем все возможные настройки
+  if (!key || key.length === 0) {
+    // Здесь вы можете добавить все доступные настройки станции
+    configurationKey.push(
+      {
+        key: "AllowOfflineTxForUnknownId",
+        readonly: false,
+        value: "false",
+      },
+      {
+        key: "AuthorizationCacheEnabled",
+        readonly: false,
+        value: "true",
+      }
+      // Добавьте другие настройки по необходимости
+    );
+  } else {
+    // Возвращаем только запрошенные ключи
+    for (const k of key) {
+      // Предположим, что у нас есть только два ключа
+      if (k === "AllowOfflineTxForUnknownId") {
+        configurationKey.push({
+          key: "AllowOfflineTxForUnknownId",
+          readonly: false,
+          value: "false",
+        });
+      } else if (k === "AuthorizationCacheEnabled") {
+        configurationKey.push({
+          key: "AuthorizationCacheEnabled",
+          readonly: false,
+          value: "true",
+        });
+      } else {
+        unknownKey.push(k);
+      }
+    }
+  }
+
+  return { configurationKey, unknownKey };
+});
+
+// Обработчик сообщения ChangeAvailability
+client.handle("ChangeAvailability", async (payload) => {
+  console.log(`[${new Date().toISOString()}] ChangeAvailability получен:`, payload);
+
+  const { connectorId, type } = payload; // type может быть 'Inoperative' или 'Operative'
+  let status = "Accepted";
+
+  if (connectorId === 0) {
+    // Изменение доступности всей станции
+    for (const connector of config.connectors) {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      dev[connectorKey].availability = type;
+      // Обновляем статус коннектора
+      const newStatus = type === "Operative" ? "Available" : "Unavailable";
+      dev[connectorKey].status = newStatus;
+      // Отправляем StatusNotification
+      await sendStatusNotification(connector.id, newStatus, "NoError");
+    }
+  } else {
+    // Изменение доступности конкретного коннектора
+    const connector = config.connectors.find((c) => c.id === connectorId);
+    if (!connector) {
+      console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
+      status = "Rejected";
+    } else {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      dev[connectorKey].availability = type;
+      // Обновляем статус коннектора
+      const newStatus = type === "Operative" ? "Available" : "Unavailable";
+      dev[connectorKey].status = newStatus;
+      // Отправляем StatusNotification
+      await sendStatusNotification(connectorId, newStatus, "NoError");
+    }
+  }
+
+  return { status };
+});
+
+// Обработчик сообщения ChangeConfiguration
+client.handle("ChangeConfiguration", async (payload) => {
+  console.log(`[${new Date().toISOString()}] ChangeConfiguration получен:`, payload);
+
+  const { key, value } = payload;
+  let status = "Accepted";
+
+  // Здесь вы можете реализовать изменение конфигурации
+  // Например, обновить конфигурационный файл и перезагрузить приложение
+  // Для простоты, мы просто логируем изменение
+
+  console.log(`[${new Date().toISOString()}] Параметр ${key} изменен на ${value}.`);
+
+  return { status };
+});
+
+// Обработчик сообщения RemoteStartTransaction
+client.handle("RemoteStartTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] RemoteStartTransaction получен:`, payload);
+
+  const connectorId = payload.connectorId || 1; // Если connectorId не указан, используем 1
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  const connector = config.connectors.find((c) => c.id === connectorId);
+
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Разъем с ID ${connectorId} не найден.`);
+    return { status: "Rejected" };
+  }
+
+  // Проверка, доступен ли разъем и его доступность не 'Inoperative'
+  if (dev[connectorKey].status !== "Available" || dev[connectorKey].availability === "Inoperative") {
+    console.error(`[${new Date().toISOString()}] Разъем ${connectorId} недоступен.`);
+    return { status: "Rejected" };
+  }
+
+  // Запуск транзакции
+  dev[connectorKey].Stat = 2;
+  dev[connectorKey].transactionId = Date.now();
+  dev[connectorKey].status = "Charging";
+  controlRelay(connector.relayPath, true);
+
+  // Отправка StatusNotification с обновленным статусом
+  await sendStatusNotification(connectorId, "Charging", "NoError");
+
+  // Отправка ответа центральной системе
+  return { status: "Accepted" };
+});
+
+// Обработчик сообщения RemoteStopTransaction
+client.handle("RemoteStopTransaction", async (payload) => {
+  console.log(`[${new Date().toISOString()}] RemoteStopTransaction получен:`, payload);
+
+  const transactionId = payload.transactionId;
+  const connector = config.connectors.find(
+    (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
+  );
+
+  if (!connector) {
+    console.error(`[${new Date().toISOString()}] Транзакция с ID ${transactionId} не найдена.`);
+    return { status: "Rejected" };
+  }
+
+  const connectorKey = `${config.stationName}_connector${connector.id}`;
+
+  // Остановка транзакции
+  dev[connectorKey].Stat = 3;
+  dev[connectorKey].status = "Available";
+  dev[connectorKey].transactionId = null;
+  controlRelay(connector.relayPath, false);
+
+  // Отправка StatusNotification с обновленным статусом
+  await sendStatusNotification(connector.id, "Available", "NoError");
+
+  // Отправка ответа центральной системе
+  return { status: "Accepted" };
+});
 
 // Функция отправки FirmwareStatusNotification
 async function sendFirmwareStatusNotification(status) {
