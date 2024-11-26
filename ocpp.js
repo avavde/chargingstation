@@ -21,7 +21,6 @@ try {
 }
 
 // Инициализация переменных
-const chargePoints = {};
 const dev = {};
 
 // Подключение к Modbus
@@ -86,6 +85,11 @@ client.on("close", () => {
 
 client.on("error", (error) => {
   console.error("Ошибка OCPP-клиента:", error.message);
+});
+
+// Логирование всех сообщений
+client.on("message", (direction, message) => {
+  console.log(`[${direction.toUpperCase()}]:`, JSON.stringify(message, null, 2));
 });
 
 // Обработчик BootNotification
