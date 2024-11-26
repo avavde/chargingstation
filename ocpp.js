@@ -78,9 +78,15 @@ client.on("message", (message) => {
 function controlRelay(path, state) {
   try {
     fs.writeFileSync(path, state ? "1" : "0");
-    console.log(`[${new Date().toISOString()}] Реле ${path} установлено в состояние ${state ? "включено" : "выключено"}`);
+    console.log(
+      `[${new Date().toISOString()}] Реле ${path} установлено в состояние ${
+        state ? "включено" : "выключено"
+      }`
+    );
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка управления реле ${path}: ${error.message}`);
+    console.error(
+      `[${new Date().toISOString()}] Ошибка управления реле ${path}: ${error.message}`
+    );
   }
 }
 
@@ -102,7 +108,7 @@ modbusClient.connectRTUBuffered(
     } else {
       console.log(`[${new Date().toISOString()}] Modbus успешно подключен.`);
 
-      // Инициализация состояния разъемов
+      // Инициализация состояния разъемов после подключения к Modbus
       for (const connector of config.connectors) {
         const connectorKey = `${config.stationName}_connector${connector.id}`;
         dev[connectorKey] = {
@@ -116,7 +122,10 @@ modbusClient.connectRTUBuffered(
           meterSerialNumber: null,
         };
         dev[connectorKey].meterSerialNumber = await readMeterSerialNumber(connector);
-        console.log(`[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`, dev[connectorKey]);
+        console.log(
+          `[${new Date().toISOString()}] Разъем ${connector.id} успешно инициализирован:`,
+          dev[connectorKey]
+        );
       }
 
       // Теперь можем подключиться к OCPP и запустить основной цикл
@@ -129,7 +138,10 @@ modbusClient.connectRTUBuffered(
 async function readMeterSerialNumber(connector) {
   try {
     modbusClient.setID(connector.meterAddress);
-    const serialNumberData = await modbusClient.readHoldingRegisters(connector.serialNumberRegister, 4); // Предполагаем, что серийный номер занимает 4 регистра
+    const serialNumberData = await modbusClient.readHoldingRegisters(
+      connector.serialNumberRegister,
+      4
+    ); // Предполагаем, что серийный номер занимает 4 регистра
     const buffer = Buffer.alloc(8);
     for (let i = 0; i < 4; i++) {
       buffer.writeUInt16BE(serialNumberData.data[i], i * 2);
@@ -137,7 +149,11 @@ async function readMeterSerialNumber(connector) {
     const serialNumber = buffer.toString("ascii").trim();
     return serialNumber;
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${connector.id}: ${error.message}`);
+    console.error(
+      `[${new Date().toISOString()}] Ошибка чтения серийного номера счётчика для разъема ${
+        connector.id
+      }: ${error.message}`
+    );
     return null;
   }
 }
@@ -199,7 +215,9 @@ client.on("open", async () => {
       modemInfo = await getModemInfo();
       console.log(`[${new Date().toISOString()}] Информация о модеме:`, modemInfo);
     } catch (modemError) {
-      console.error(`[${new Date().toISOString()}] Не удалось получить информацию о модеме: ${modemError.message}`);
+      console.error(
+        `[${new Date().toISOString()}] Не удалось получить информацию о модеме: ${modemError.message}`
+      );
     }
 
     // Собираем серийные номера счетчиков
@@ -225,7 +243,10 @@ client.on("open", async () => {
     }
 
     const bootResponse = await client.call("BootNotification", bootPayload);
-    console.log(`[${new Date().toISOString()}] BootNotification отправлен. Ответ:`, JSON.stringify(bootResponse, null, 2));
+    console.log(
+      `[${new Date().toISOString()}] BootNotification отправлен. Ответ:`,
+      JSON.stringify(bootResponse, null, 2)
+    );
 
     if (bootResponse.status === "Accepted") {
       console.log(`[${new Date().toISOString()}] BootNotification принят.`);
@@ -261,9 +282,14 @@ async function sendStatusNotification(connectorId, status, errorCode) {
       timestamp: new Date().toISOString(),
       info: dev[connectorKey]?.meterSerialNumber || "Unknown",
     });
-    console.log(`[${new Date().toISOString()}] StatusNotification отправлен для коннектора ${connectorId}. Ответ:`, JSON.stringify(response, null, 2));
+    console.log(
+      `[${new Date().toISOString()}] StatusNotification отправлен для коннектора ${connectorId}. Ответ:`,
+      JSON.stringify(response, null, 2)
+    );
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка отправки StatusNotification для коннектора ${connectorId}: ${error.message}`);
+    console.error(
+      `[${new Date().toISOString()}] Ошибка отправки StatusNotification для коннектора ${connectorId}: ${error.message}`
+    );
   }
 }
 
@@ -271,7 +297,10 @@ async function sendStatusNotification(connectorId, status, errorCode) {
 async function sendHeartbeat() {
   try {
     const response = await client.call("Heartbeat", {});
-    console.log(`[${new Date().toISOString()}] Heartbeat отправлен. Ответ:`, JSON.stringify(response, null, 2));
+    console.log(
+      `[${new Date().toISOString()}] Heartbeat отправлен. Ответ:`,
+      JSON.stringify(response, null, 2)
+    );
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Ошибка отправки Heartbeat: ${error.message}`);
   }
@@ -313,7 +342,9 @@ client.handle("RemoteStopTransaction", async (payload) => {
   console.log(`[${new Date().toISOString()}] RemoteStopTransaction получен:`, payload);
 
   const transactionId = payload.transactionId;
-  const connector = config.connectors.find((c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId);
+  const connector = config.connectors.find(
+    (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
+  );
 
   if (!connector) {
     console.error(`[${new Date().toISOString()}] Транзакция с ID ${transactionId} не найдена.`);
@@ -395,13 +426,17 @@ async function updateModbusData() {
         dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
 
         console.log(
-          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
+          `[${new Date().toISOString()}] Разъем: ${connector.id}, Энергия: ${
+            dev[connectorKey].Kwt
+          } кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
         );
 
         // Отправка MeterValues
         await sendMeterValues(connector.id);
       } catch (error) {
-        console.error(`[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
+        console.error(
+          `[${new Date().toISOString()}] Ошибка обновления данных разъема ${connector.id}: ${error.message}`
+        );
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -433,9 +468,14 @@ async function sendMeterValues(connectorId) {
         },
       ],
     });
-    console.log(`[${new Date().toISOString()}] MeterValues отправлен для коннектора ${connectorId}. Ответ:`, JSON.stringify(response, null, 2));
+    console.log(
+      `[${new Date().toISOString()}] MeterValues отправлен для коннектора ${connectorId}. Ответ:`,
+      JSON.stringify(response, null, 2)
+    );
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка отправки MeterValues для коннектора ${connectorId}: ${error.message}`);
+    console.error(
+      `[${new Date().toISOString()}] Ошибка отправки MeterValues для коннектора ${connectorId}: ${error.message}`
+    );
   }
 }
 
@@ -453,7 +493,7 @@ client.handle("UpdateFirmware", async (payload) => {
 
     // Имитация загрузки и обновления
     setTimeout(async () => {
-      // Отправляем FirmwareStatusNotification со статусом "Installation"
+      // Отправляем FirmwareStatusNotification со статусом "Installing"
       await sendFirmwareStatusNotification("Installing");
 
       // Имитация завершения обновления
@@ -474,8 +514,13 @@ async function sendFirmwareStatusNotification(status) {
       status,
       timestamp: new Date().toISOString(),
     });
-    console.log(`[${new Date().toISOString()}] FirmwareStatusNotification отправлен со статусом ${status}. Ответ:`, JSON.stringify(response, null, 2));
+    console.log(
+      `[${new Date().toISOString()}] FirmwareStatusNotification отправлен со статусом ${status}. Ответ:`,
+      JSON.stringify(response, null, 2)
+    );
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`);
+    console.error(
+      `[${new Date().toISOString()}] Ошибка отправки FirmwareStatusNotification: ${error.message}`
+    );
   }
 }
