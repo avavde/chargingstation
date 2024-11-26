@@ -11,7 +11,7 @@
       "meterAddress": 1,
       "meterRegister": 5218,
       "currentRegister": 5220,
-      "serialNumberRegister": 1000, // Добавлено
+      "serialNumberRegister": 1000,
       "typeNumber": 3
     },
     {
@@ -20,12 +20,12 @@
       "meterAddress": 2,
       "meterRegister": 5218,
       "currentRegister": 5220,
-      "serialNumberRegister": 1000, // Добавлено
+      "serialNumberRegister": 1000,
       "typeNumber": 4
     }
   ],
   "modbusPort": "/dev/ttymxc4",
   "modbusBaudRate": 9600,
   "pricePerKwh": 5.0,
-  "modemPort": "/dev/ttyUSB0" // Добавлено
+  "modemPort": "/dev/ttyUSB0" 
 }
