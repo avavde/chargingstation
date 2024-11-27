@@ -22,12 +22,12 @@ const extract = require('extract-zip'); // Пакет для распаковк�
 const configDir = path.join(__dirname, '../../config');
 const localAuthListPath = path.join(configDir, 'local_authorization_list.json');
 
-// Убедимся, что директория существует
+/
 if (!fs.existsSync(configDir)) {
   fs.mkdirSync(configDir, { recursive: true });
 }
 
-// Проверяем наличие файла локального списка авторизации, если нет - создаем
+
 if (!fs.existsSync(localAuthListPath)) {
   fs.writeFileSync(localAuthListPath, JSON.stringify({ listVersion: 0, idTagList: [] }, null, 2));
 }
