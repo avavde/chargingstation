@@ -1,7 +1,7 @@
 // src/index.js
 
 const config = require('./config');
-const { initializeOCPPClient } = require('./clients/ocppClient');
+const { initializeOCPPClient, getClient } = require('./clients/ocppClient');
 const { initializeModbusClient, modbusClient } = require('./clients/modbusClient');
 const { getModemInfo } = require('./clients/modemClient');
 const { setupOCPPHandlers } = require('./handlers/ocppHandlers');
@@ -22,17 +22,15 @@ setupErrorHandlers();
   try {
     await initializeModbusClient();
 
-    // Проверяем, удалось ли подключиться к Modbus
     const modbusConnected = modbusClient.isOpen;
     if (!modbusConnected) {
       logger.warn('Modbus-клиент не инициализирован. Все коннекторы будут установлены в статус Inoperative.');
-      // Устанавливаем статус Inoperative для всех коннекторов
       for (const connector of config.connectors) {
         const connectorKey = `${config.stationName}_connector${connector.id}`;
         dev[connectorKey].status = 'Unavailable';
         dev[connectorKey].availability = 'Inoperative';
-        // Отправляем StatusNotification
-        await sendStatusNotification(connector.id, 'Unavailable', 'NoError');
+        // Теперь передаем client, но у нас его еще нет! Нужно сначала инициализировать OCPP-клиент и получить client.
+        // Поэтому пока не вызываем sendStatusNotification здесь. Запомним изменение статуса, а StatusNotification отправим позже.
       }
     } else {
       logger.info('Modbus-клиент успешно подключен.');
@@ -42,22 +40,33 @@ setupErrorHandlers();
     logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
 
     await initializeOCPPClient();
+    const client = getClient(); // Получаем OCPP-клиент после инициализации
 
-    setupOCPPHandlers();
+    setupOCPPHandlers(client);
 
-    await sendBootNotification(modemInfo);
+    await sendBootNotification(client, modemInfo);
 
-    await sendInitialStatusNotifications();
+    await sendInitialStatusNotifications(client);
+
+    // Теперь, если Modbus не был инициализирован, мы можем отправить StatusNotification для коннекторов Unavailable
+    if (!modbusConnected) {
+      logger.warn('Modbus-клиент не инициализирован, отправляем StatusNotification Unavailable для всех коннекторов...');
+      for (const connector of config.connectors) {
+        const connectorKey = `${config.stationName}_connector${connector.id}`;
+        // Статус уже установлен в Unavailable, теперь отправим StatusNotification с client
+        await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
+      }
+    }
 
     // Запускаем обновление данных Modbus только если подключение успешно
     if (modbusConnected) {
-      updateModbusData();
+      updateModbusData(client); // Передаем client первым аргументом
     } else {
       logger.warn('Данные Modbus не будут обновляться из-за отсутствия подключения.');
     }
 
     // Установка периодической проверки истечения бронирований
-    setInterval(checkReservations, 60000);
+    setInterval(() => checkReservations(client), 60000); // Передаем client
 
     logger.info('Приложение успешно запущено.');
   } catch (error) {
