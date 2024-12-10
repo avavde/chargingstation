@@ -1,50 +1,70 @@
-// src/clients/modbusClient.js
-
 const ModbusRTU = require('modbus-serial');
-const config = require('../config');
 const logger = require('../utils/logger');
+const { sendStatusNotification } = require('../utils/ocppUtils');
+const config = require('../config');
+const dev = require('../dev');
 
 const modbusClient = new ModbusRTU();
 
+// Таймаут для чтения регистров
+async function readWithTimeout(register, length = 2, timeout = 1000) {
+  return Promise.race([
+    modbusClient.readHoldingRegisters(register, length),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Modbus таймаут')), timeout)),
+  ]);
+}
+
+// Инициализация Modbus клиента
 async function initializeModbusClient() {
   try {
+    logger.info('Инициализация Modbus-клиента...');
     await modbusClient.connectRTUBuffered(config.modbusPort, {
       baudRate: config.modbusBaudRate,
       dataBits: 8,
       parity: 'none',
       stopBits: 1,
     });
-    // Установка таймаута для операций modbus:
-    modbusClient.setTimeout(500); // например, 500 мс = o,5 секунды
-
+    modbusClient.setTimeout(1000); // 1 секунда таймаут
     logger.info('Modbus-клиент успешно инициализирован.');
   } catch (error) {
-    logger.error(`Ошибка подключения к Modbus: ${error.message}`);
-    // Не выбрасываем исключение, чтобы приложение продолжило работу
+    logger.error(`Ошибка при инициализации Modbus-клиента: ${error.message}`);
   }
 }
 
-async function readMeterSerialNumber(connector) {
-  try {
-    logger.info(`Чтение серийного номера для коннектора ${connector.id}...`);
-    modbusClient.setID(connector.meterAddress);
-    logger.info(`Адрес Modbus устройства: ${connector.meterAddress}, регистр: ${connector.serialNumberRegister}`);
-    const serialNumberData = await modbusClient.readHoldingRegisters(connector.serialNumberRegister, 4);
-    logger.info(`Данные серийного номера для коннектора ${connector.id} получены: ${JSON.stringify(serialNumberData)}`);
+// Функция для опроса данных Modbus
+async function pollModbusData(client) {
+  logger.info('Запуск опроса данных Modbus...');
+  setInterval(async () => {
+    for (const connector of config.connectors) {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      try {
+        console.log(`Опрос Modbus для коннектора ${connector.id}...`);
 
-    const buffer = Buffer.alloc(8);
-    for (let i = 0; i < 4; i++) {
-      buffer.writeUInt16BE(serialNumberData.data[i], i * 2);
+        // Чтение энергии
+        const energy = await readWithTimeout(connector.meterRegister, 2, 1000);
+        const current = await readWithTimeout(connector.currentRegister, 2, 1000);
+
+        dev[connectorKey].Kwt = energy;
+        dev[connectorKey].Current = current;
+
+        if (dev[connectorKey].status === 'Unavailable') {
+          dev[connectorKey].status = 'Available';
+          await sendStatusNotification(client, connector.id, 'Available', 'NoError');
+        }
+      } catch (error) {
+        logger.error(`Ошибка Modbus для коннектора ${connector.id}: ${error.message}`);
+        if (dev[connectorKey].status !== 'Unavailable') {
+          dev[connectorKey].status = 'Unavailable';
+          await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
+        }
+      }
     }
-    const serialNumber = buffer.toString('ascii').trim();
-    return serialNumber;
-  } catch (error) {
-    throw new Error(`Ошибка чтения серийного номера: ${error.message}`);
-  }
+  }, config.modbusPollInterval || 5000);
 }
 
 module.exports = {
   modbusClient,
   initializeModbusClient,
-  readMeterSerialNumber,
+  pollModbusData,
+  readWithTimeout, // Обязательно экспортируем readWithTimeout
 };
