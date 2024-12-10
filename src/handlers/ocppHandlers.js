@@ -37,7 +37,6 @@ function setupOCPPHandlers(client) {
     logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
     const { idTag } = payload;
 
-    // Проверяем наличие idTag в локальном списке авторизации
     const isAuthorized = localAuthList.idTagList.some(
       (item) => item.idTag === idTag && item.idTagInfo.status === 'Accepted'
     );
@@ -101,7 +100,8 @@ function setupOCPPHandlers(client) {
         return { status: 'Rejected' };
       }
 
-      await startTransaction(connectorId, idTag, client);
+      // Вызов с первым аргументом client
+      await startTransaction(client, connectorId, idTag);
 
       return { status: 'Accepted' };
     } catch (error) {
@@ -124,7 +124,8 @@ function setupOCPPHandlers(client) {
       return { status: 'Rejected' };
     }
 
-    await stopTransaction(connector.id, client);
+    // Вызов с первым аргументом client
+    await stopTransaction(client, connector.id);
 
     return { status: 'Accepted' };
   });
