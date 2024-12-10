@@ -31,16 +31,23 @@ async function initializeModbusClient() {
   }
 }
 
-// Функция для опроса данных Modbus
+const errorCounters = {}; // Счетчик таймаутов для коннекторов
+
 async function pollModbusData(client) {
   logger.info('Запуск опроса данных Modbus...');
   setInterval(async () => {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
+      errorCounters[connectorKey] = errorCounters[connectorKey] || { count: 0, disabledUntil: 0 };
+
+      const now = Date.now();
+      if (now < errorCounters[connectorKey].disabledUntil) {
+        console.log(`Опрос для коннектора ${connector.id} временно отключен.`);
+        continue; // Пропускаем коннектор на время отключения
+      }
+
       try {
         console.log(`Опрос Modbus для коннектора ${connector.id}...`);
-
-        // Чтение энергии
         const energy = await readWithTimeout(connector.meterRegister, 2, 1000);
         const current = await readWithTimeout(connector.currentRegister, 2, 1000);
 
@@ -51,8 +58,17 @@ async function pollModbusData(client) {
           dev[connectorKey].status = 'Available';
           await sendStatusNotification(client, connector.id, 'Available', 'NoError');
         }
+
+        errorCounters[connectorKey].count = 0; // Сбрасываем счетчик ошибок
       } catch (error) {
+        errorCounters[connectorKey].count += 1;
         logger.error(`Ошибка Modbus для коннектора ${connector.id}: ${error.message}`);
+
+        if (errorCounters[connectorKey].count >= 3) {
+          logger.warn(`Коннектор ${connector.id} отключен на 30 секунд из-за повторных ошибок.`);
+          errorCounters[connectorKey].disabledUntil = now + 30000; // Отключаем на 30 секунд
+        }
+
         if (dev[connectorKey].status !== 'Unavailable') {
           dev[connectorKey].status = 'Unavailable';
           await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
