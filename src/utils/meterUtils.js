@@ -6,7 +6,7 @@ const dev = require('../dev');
 const logger = require('./logger');
 const { sendStatusNotification } = require('./ocppUtils');
 
-function updateModbusData() {
+function updateModbusData(client) {
   setInterval(async () => {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
@@ -14,11 +14,15 @@ function updateModbusData() {
         // Устанавливаем адрес счетчика
         modbusClient.setID(connector.meterAddress);
 
-        // Читаем показания энергии
+        // Читаем показания энергии (2 регистра)
         const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
+        // Предполагая что данные нужно преобразовать, если это float, убедитесь что это корректно
+        // Здесь используем readFloatBE только если это действительно float в Big-Endian.
+        // Если данные — это raw uint32, возможно нужно другое преобразование.
+        // Предположим, что счетчик возвращает float 32-bit Big-Endian.
         const energy = energyData.buffer.readFloatBE(0);
 
-        // Читаем показания тока
+        // Читаем показания тока (2 регистра)
         const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 2);
         const current = currentData.buffer.readFloatBE(0);
 
@@ -30,7 +34,7 @@ function updateModbusData() {
         if (dev[connectorKey].status === 'Unavailable') {
           dev[connectorKey].status = 'Available';
           dev[connectorKey].availability = 'Operative';
-          await sendStatusNotification(connector.id, 'Available', 'NoError');
+          await sendStatusNotification(client, connector.id, 'Available', 'NoError');
         }
       } catch (error) {
         logger.error(`Ошибка при обновлении данных для коннектора ${connector.id}: ${error.message}`);
@@ -38,7 +42,7 @@ function updateModbusData() {
         // Устанавливаем статус Inoperative для недоступного коннектора
         dev[connectorKey].status = 'Unavailable';
         dev[connectorKey].availability = 'Inoperative';
-        await sendStatusNotification(connector.id, 'Unavailable', 'NoError');
+        await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
       }
     }
   }, 5000); // Интервал обновления данных, например, каждые 5 секунд

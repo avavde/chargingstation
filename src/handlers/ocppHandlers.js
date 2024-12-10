@@ -16,7 +16,7 @@ const { modbusClient } = require('../clients/modbusClient');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const extract = require('extract-zip'); // Пакет для распаковки ZIP-архивов
+const extract = require('extract-zip');
 
 const configDir = path.join(__dirname, '../../config');
 const localAuthListPath = path.join(configDir, 'local_authorization_list.json');
@@ -100,7 +100,7 @@ function setupOCPPHandlers(client) {
         return { status: 'Rejected' };
       }
 
-      // Вызов с первым аргументом client
+      // Передаем client первым аргументом
       await startTransaction(client, connectorId, idTag);
 
       return { status: 'Accepted' };
@@ -114,20 +114,24 @@ function setupOCPPHandlers(client) {
   client.handle('RemoteStopTransaction', async (payload) => {
     logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload)}`);
 
-    const { transactionId } = payload;
-    const connector = config.connectors.find(
-      (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
-    );
+    try {
+      const { transactionId } = payload;
+      const connector = config.connectors.find(
+        (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
+      );
 
-    if (!connector) {
-      logger.error(`Транзакция с ID ${transactionId} не найдена.`);
+      if (!connector) {
+        logger.error(`Транзакция с ID ${transactionId} не найдена.`);
+        return { status: 'Rejected' };
+      }
+
+      await stopTransaction(client, connector.id);
+
+      return { status: 'Accepted' };
+    } catch (error) {
+      logger.error(`Ошибка в обработчике RemoteStopTransaction: ${error.message}`);
       return { status: 'Rejected' };
     }
-
-    // Вызов с первым аргументом client
-    await stopTransaction(client, connector.id);
-
-    return { status: 'Accepted' };
   });
 
   // Обработчик ChangeAvailability
