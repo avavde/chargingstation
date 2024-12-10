@@ -412,7 +412,7 @@ async function startTransaction(connectorId, idTag) {
   dev[connectorKey].transactionId = response.transactionId;
 
   // Отправляем StatusNotification
-  await sendStatusNotification(connectorId, "Charging", "NoError");
+  await sendStatusNotification(client, connectorId, "Charging", "NoError");
 }
 
 // Функция для остановки транзакции
@@ -443,7 +443,7 @@ async function stopTransaction(connectorId) {
   dev[connectorKey].status = "Available";
 
   // Отправляем StatusNotification
-  await sendStatusNotification(connectorId, "Available", "NoError");
+  await sendStatusNotification(client, connectorId, "Available", "NoError");
 }
 
 // обработчик RemoteStartTransaction

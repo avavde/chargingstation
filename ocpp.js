@@ -462,7 +462,7 @@ client.handle("ChangeAvailability", async (payload) => {
       const newStatus = type === "Operative" ? "Available" : "Unavailable";
       dev[connectorKey].status = newStatus;
       // Отправляем StatusNotification
-      await sendStatusNotification(connectorId, newStatus, "NoError");
+      await sendStatusNotification(client, connectorId, newStatus, "NoError");
     }
   }
 
@@ -518,7 +518,7 @@ client.handle("ReserveNow", async (payload) => {
 
   // Обновляем статус разъема
   dev[connectorKey].status = "Reserved";
-  await sendStatusNotification(connectorId, "Reserved", "NoError");
+  await sendStatusNotification(client, connectorId, "Reserved", "NoError");
 
   return { status: "Accepted" };
 });
@@ -535,7 +535,7 @@ client.handle("CancelReservation", async (payload) => {
 
     const connectorKey = `${config.stationName}_connector${connectorId}`;
     dev[connectorKey].status = "Available";
-    await sendStatusNotification(connectorId, "Available", "NoError");
+    await sendStatusNotification(client, connectorId, "Available", "NoError");
 
     return { status: "Accepted" };
   } else {
@@ -566,7 +566,7 @@ async function startTransaction(connectorId, idTag) {
   dev[connectorKey].transactionId = response.transactionId;
 
   // Отправляем StatusNotification
-  await sendStatusNotification(connectorId, "Charging", "NoError");
+  await sendStatusNotification(client, connectorId, "Charging", "NoError");
 }
 
 // Функция для остановки транзакции
@@ -597,7 +597,7 @@ async function stopTransaction(connectorId) {
   dev[connectorKey].status = "Available";
 
   // Отправляем StatusNotification
-  await sendStatusNotification(connectorId, "Available", "NoError");
+  await sendStatusNotification(client, connectorId, "Available", "NoError");
 }
 
 // обработчик RemoteStartTransaction

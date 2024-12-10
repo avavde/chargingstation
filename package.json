@@ -8,6 +8,7 @@
     "ocpp": "^0.0.1",
     "ocpp-eliftech": "^1.0.2",
     "ocpp-js": "^1.1.6",
+    "ocpp-rpc": "^2.1.2",
     "winston": "^3.17.0"
   }
 }
