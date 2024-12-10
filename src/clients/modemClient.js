@@ -10,6 +10,13 @@ async function getModemInfo() {
     let iccid = null;
     let imsi = null;
 
+    // Таймаут на чтение данных (например, 3 секунды)
+    const timeout = setTimeout(() => {
+      logger.warn('Таймаут при получении данных модема.');
+      port.close();
+      resolve({ iccid: null, imsi: null });
+    }, 3000);
+
     parser.on('data', (line) => {
       line = line.trim();
       if (line.includes('CCID')) {
@@ -19,6 +26,7 @@ async function getModemInfo() {
         imsi = line;
       }
       if (iccid && imsi) {
+        clearTimeout(timeout);
         port.close();
         resolve({ iccid, imsi });
       }
@@ -32,11 +40,13 @@ async function getModemInfo() {
     });
 
     port.on('error', (err) => {
+      clearTimeout(timeout);
       logger.error(`Ошибка чтения данных модема: ${err.message}`);
       resolve({ iccid: null, imsi: null });
     });
   });
 }
+
 
 module.exports = {
   getModemInfo,
