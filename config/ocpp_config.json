@@ -8,14 +8,14 @@
     {
       "id": 1,
       "relayPath": "/sys/class/gpio/gpio122/value",
-      "meterAddress": 157,
+      "meterAddress": 1,
       "meterRegister": 5218,
       "currentRegister": 5220,
       "serialNumberRegister": 1000,
       "typeNumber": 3
     }
   ],
-  "modbusPort": "/dev/ttyUSB0",
+  "modbusPort": "/dev/ttymxc2",
   "modbusBaudRate": 9600,
   "pricePerKwh": 5.0,
   "modemPort": "/dev/ttyUSB0"
