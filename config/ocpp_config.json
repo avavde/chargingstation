@@ -7,21 +7,12 @@
   "connectors": [
     {
       "id": 1,
-      "relayPath": "/sys/class/gpio/gpio121/value",
+      "relayPath": "/sys/class/gpio/gpio122/value",
       "meterAddress": 1,
       "meterRegister": 5218,
       "currentRegister": 5220,
       "serialNumberRegister": 1000,
       "typeNumber": 3
-    },
-    {
-      "id": 2,
-      "relayPath": "/sys/class/gpio/gpio122/value",
-      "meterAddress": 2,
-      "meterRegister": 5218,
-      "currentRegister": 5220,
-      "serialNumberRegister": 1000,
-      "typeNumber": 4
     }
   ],
   "modbusPort": "/dev/ttymxc4",
