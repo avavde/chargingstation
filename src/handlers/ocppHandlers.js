@@ -1,6 +1,5 @@
 // src/handlers/ocppHandlers.js
 
-const { client } = require('../clients/ocppClient');
 const { startTransaction, stopTransaction } = require('../utils/transactionManager');
 const {
   sendFirmwareStatusNotification,
@@ -22,11 +21,9 @@ const extract = require('extract-zip'); // Пакет для распаковк�
 const configDir = path.join(__dirname, '../../config');
 const localAuthListPath = path.join(configDir, 'local_authorization_list.json');
 
-
 if (!fs.existsSync(configDir)) {
   fs.mkdirSync(configDir, { recursive: true });
 }
-
 
 if (!fs.existsSync(localAuthListPath)) {
   fs.writeFileSync(localAuthListPath, JSON.stringify({ listVersion: 0, idTagList: [] }, null, 2));
@@ -34,7 +31,7 @@ if (!fs.existsSync(localAuthListPath)) {
 
 let localAuthList = JSON.parse(fs.readFileSync(localAuthListPath, 'utf-8'));
 
-function setupOCPPHandlers() {
+function setupOCPPHandlers(client) {
   // Обработчик Authorize
   client.handle('Authorize', async (payload) => {
     logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
@@ -55,16 +52,12 @@ function setupOCPPHandlers() {
   // Обработчик StartTransaction
   client.handle('StartTransaction', async (payload) => {
     logger.info(`StartTransaction получен: ${JSON.stringify(payload)}`);
-    // Здесь мы можем обработать сообщение StartTransaction, если это необходимо
-    // Обычно станция сама инициирует StartTransaction
     return {};
   });
 
   // Обработчик StopTransaction
   client.handle('StopTransaction', async (payload) => {
     logger.info(`StopTransaction получен: ${JSON.stringify(payload)}`);
-    // Здесь мы можем обработать сообщение StopTransaction, если это необходимо
-    // Обычно станция сама инициирует StopTransaction
     return {};
   });
 
@@ -74,14 +67,11 @@ function setupOCPPHandlers() {
 
     const { vendorId, messageId, data } = payload;
 
-    // заготовкаобработки пользовательских данных
     if (vendorId === 'YourVendorId') {
       if (messageId === 'UpdateSetting') {
-        // Обновление настройки
         const { key, value } = data;
         config[key] = value;
-        // Сохраняем обновленную конфигурацию
-        fs.writeFileSync(path.join(__dirname, '../config/ocpp_config.json'), JSON.stringify(config, null, 2));
+        fs.writeFileSync(path.join(__dirname, '../../config/ocpp_config.json'), JSON.stringify(config, null, 2));
         logger.info(`Настройка ${key} обновлена на ${value}`);
         return { status: 'Accepted', data: 'Setting updated' };
       }
@@ -90,38 +80,35 @@ function setupOCPPHandlers() {
     return { status: 'Accepted', data: 'Data processed' };
   });
 
-// Обработчик RemoteStartTransaction
-client.handle('RemoteStartTransaction', async (payload) => {
-  logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
+  // Обработчик RemoteStartTransaction
+  client.handle('RemoteStartTransaction', async (payload) => {
+    logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
 
-  try {
-    const connectorId = payload.connectorId || 1;
-    const idTag = payload.idTag || 'Unknown';
+    try {
+      const connectorId = payload.connectorId || 1;
+      const idTag = payload.idTag || 'Unknown';
 
-    const connectorKey = `${config.stationName}_connector${connectorId}`;
-    const connector = config.connectors.find((c) => c.id === connectorId);
+      const connectorKey = `${config.stationName}_connector${connectorId}`;
+      const connector = config.connectors.find((c) => c.id === connectorId);
 
-    if (!connector) {
-      logger.error(`Разъем с ID ${connectorId} не найден.`);
+      if (!connector) {
+        logger.error(`Разъем с ID ${connectorId} не найден.`);
+        return { status: 'Rejected' };
+      }
+
+      if (dev[connectorKey].status !== 'Available' || dev[connectorKey].availability !== 'Operative') {
+        logger.error(`Разъем ${connectorId} недоступен для зарядки.`);
+        return { status: 'Rejected' };
+      }
+
+      await startTransaction(connectorId, idTag, client);
+
+      return { status: 'Accepted' };
+    } catch (error) {
+      logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
       return { status: 'Rejected' };
     }
-
-    // Проверяем, доступен ли разъем
-    if (dev[connectorKey].status !== 'Available' || dev[connectorKey].availability !== 'Operative') {
-      logger.error(`Разъем ${connectorId} недоступен для зарядки.`);
-      return { status: 'Rejected' };
-    }
-
-    // Начинаем транзакцию
-    await startTransaction(connectorId, idTag);
-
-    return { status: 'Accepted' };
-  } catch (error) {
-    logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
-    return { status: 'Rejected' };
-  }
-});
-
+  });
 
   // Обработчик RemoteStopTransaction
   client.handle('RemoteStopTransaction', async (payload) => {
@@ -137,7 +124,7 @@ client.handle('RemoteStartTransaction', async (payload) => {
       return { status: 'Rejected' };
     }
 
-    await stopTransaction(connector.id);
+    await stopTransaction(connector.id, client);
 
     return { status: 'Accepted' };
   });
@@ -146,35 +133,34 @@ client.handle('RemoteStartTransaction', async (payload) => {
   client.handle('ChangeAvailability', async (payload) => {
     logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
 
-    const { connectorId, type } = payload; // type может быть 'Inoperative' или 'Operative'
+    const { connectorId, type } = payload;
     let status = 'Accepted';
 
-    if (connectorId === 0) {
-      // Изменение доступности всей станции
-      for (const connector of config.connectors) {
-        const connectorKey = `${config.stationName}_connector${connector.id}`;
-        dev[connectorKey].availability = type;
-        // Обновляем статус коннектора
-        const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
-        dev[connectorKey].status = newStatus;
-        // Отправляем StatusNotification
-        await sendStatusNotification(connector.id, newStatus, 'NoError');
-      }
-    } else {
-      // Изменение доступности конкретного коннектора
-      const connector = config.connectors.find((c) => c.id === connectorId);
-      if (!connector) {
-        logger.error(`Разъем с ID ${connectorId} не найден.`);
-        status = 'Rejected';
+    try {
+      if (connectorId === 0) {
+        for (const connector of config.connectors) {
+          const connectorKey = `${config.stationName}_connector${connector.id}`;
+          dev[connectorKey].availability = type;
+          const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
+          dev[connectorKey].status = newStatus;
+          await sendStatusNotification(client, connector.id, newStatus, 'NoError');
+        }
       } else {
-        const connectorKey = `${config.stationName}_connector${connector.id}`;
-        dev[connectorKey].availability = type;
-        // Обновляем статус коннектора
-        const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
-        dev[connectorKey].status = newStatus;
-        // Отправляем StatusNotification
-        await sendStatusNotification(connectorId, newStatus, 'NoError');
+        const connector = config.connectors.find((c) => c.id === connectorId);
+        if (!connector) {
+          logger.error(`Разъем с ID ${connectorId} не найден.`);
+          status = 'Rejected';
+        } else {
+          const connectorKey = `${config.stationName}_connector${connector.id}`;
+          dev[connectorKey].availability = type;
+          const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
+          dev[connectorKey].status = newStatus;
+          await sendStatusNotification(client, connectorId, newStatus, 'NoError');
+        }
       }
+    } catch (error) {
+      logger.error(`Ошибка в обработчике ChangeAvailability: ${error.message}`);
+      status = 'Rejected';
     }
 
     return { status };
@@ -187,7 +173,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
     const { key, value } = payload;
     let status = 'Accepted';
 
-    // Проверяем, что ключ существует и не является только для чтения
     const allowedKeys = ['AllowOfflineTxForUnknownId', 'AuthorizationCacheEnabled', 'pricePerKwh'];
     const readOnlyKeys = ['stationName', 'vendor'];
 
@@ -198,10 +183,8 @@ client.handle('RemoteStartTransaction', async (payload) => {
       status = 'Rejected';
       logger.error(`Ключ ${key} является только для чтения.`);
     } else {
-      // Обновляем конфигурацию
       config[key] = value;
-      // Сохраняем конфигурацию в файл
-      fs.writeFileSync(path.join(__dirname, '../config/ocpp_config.json'), JSON.stringify(config, null, 2));
+      fs.writeFileSync(path.join(__dirname, '../../config/ocpp_config.json'), JSON.stringify(config, null, 2));
       logger.info(`Параметр ${key} изменен на ${value}.`);
     }
 
@@ -216,9 +199,7 @@ client.handle('RemoteStartTransaction', async (payload) => {
     const configurationKey = [];
     const unknownKey = [];
 
-    // Если ключи не указаны, возвращаем все возможные настройки
     if (!key || key.length === 0) {
-      // Добавляем все настройки
       for (const [k, v] of Object.entries(config)) {
         configurationKey.push({
           key: k,
@@ -227,7 +208,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
         });
       }
     } else {
-      // Возвращаем только запрошенные ключи
       for (const k of key) {
         if (config.hasOwnProperty(k)) {
           configurationKey.push({
@@ -257,14 +237,11 @@ client.handle('RemoteStartTransaction', async (payload) => {
     }
 
     const connectorKey = `${config.stationName}_connector${connectorId}`;
-
-    // Проверяем, доступен ли разъем
     if (dev[connectorKey].status !== 'Available') {
       logger.error(`Разъем ${connectorId} недоступен для бронирования.`);
       return { status: 'Occupied' };
     }
 
-    // Создаем бронирование
     addReservation(reservationId, {
       connectorId,
       expiryDate: new Date(expiryDate),
@@ -272,9 +249,8 @@ client.handle('RemoteStartTransaction', async (payload) => {
       stationName: config.stationName,
     });
 
-    // Обновляем статус разъема
     dev[connectorKey].status = 'Reserved';
-    await sendStatusNotification(connectorId, 'Reserved', 'NoError');
+    await sendStatusNotification(client, connectorId, 'Reserved', 'NoError');
 
     return { status: 'Accepted' };
   });
@@ -285,14 +261,13 @@ client.handle('RemoteStartTransaction', async (payload) => {
 
     const { reservationId } = payload;
 
-    const reservation = reservations[reservationId];
-    if (reservation) {
-      const connectorId = reservation.connectorId;
+    if (reservations[reservationId]) {
+      const connectorId = reservations[reservationId].connectorId;
       removeReservation(reservationId);
 
       const connectorKey = `${config.stationName}_connector${connectorId}`;
       dev[connectorKey].status = 'Available';
-      await sendStatusNotification(connectorId, 'Available', 'NoError');
+      await sendStatusNotification(client, connectorId, 'Available', 'NoError');
 
       return { status: 'Accepted' };
     } else {
@@ -306,17 +281,12 @@ client.handle('RemoteStartTransaction', async (payload) => {
     logger.info(`UpdateFirmware получен: ${JSON.stringify(payload)}`);
 
     const { location, retrieveDate } = payload;
-
-    // Проверяем дату начала загрузки
     const now = new Date();
     const startDownloadDate = retrieveDate ? new Date(retrieveDate) : now;
 
     const downloadFirmware = async () => {
       try {
-        // Отправляем FirmwareStatusNotification со статусом 'Downloading'
-        await sendFirmwareStatusNotification('Downloading');
-
-        // Загрузка файла прошивки
+        await sendFirmwareStatusNotification(client, 'Downloading');
         const firmwarePath = path.join(__dirname, '../firmware/update.zip');
         const file = fs.createWriteStream(firmwarePath);
         const protocol = location.startsWith('https') ? require('https') : require('http');
@@ -326,42 +296,37 @@ client.handle('RemoteStartTransaction', async (payload) => {
             response.pipe(file);
             file.on('finish', async () => {
               file.close(async () => {
-                // Отправляем FirmwareStatusNotification со статусом 'Downloaded'
-                await sendFirmwareStatusNotification('Downloaded');
+                await sendFirmwareStatusNotification(client, 'Downloaded');
+                await sendFirmwareStatusNotification(client, 'Installing');
 
-                // Распаковка прошивки
-                await sendFirmwareStatusNotification('Installing');
                 try {
-                  // Распаковываем архив в корневой каталог, исключая config/ocpp_config.json
                   await extract(firmwarePath, {
-                    dir: path.resolve('/'), // Корневой каталог
+                    dir: path.resolve('/'),
                     onEntry: (entry, zipfile) => {
                       if (entry.fileName.includes('config/ocpp_config.json')) {
-                        // Пропускаем файл конфигурации
                         zipfile.ignoreEntry();
                       }
                     },
                   });
-                  await sendFirmwareStatusNotification('Installed');
+                  await sendFirmwareStatusNotification(client, 'Installed');
                   logger.info('Прошивка успешно обновлена.');
                 } catch (extractError) {
                   logger.error(`Ошибка распаковки прошивки: ${extractError.message}`);
-                  await sendFirmwareStatusNotification('InstallationFailed');
+                  await sendFirmwareStatusNotification(client, 'InstallationFailed');
                 }
               });
             });
           })
           .on('error', async (err) => {
             logger.error(`Ошибка загрузки прошивки: ${err.message}`);
-            await sendFirmwareStatusNotification('DownloadFailed');
+            await sendFirmwareStatusNotification(client, 'DownloadFailed');
           });
       } catch (error) {
         logger.error(`Ошибка при обновлении прошивки: ${error.message}`);
-        await sendFirmwareStatusNotification('InstallationFailed');
+        await sendFirmwareStatusNotification(client, 'InstallationFailed');
       }
     };
 
-    // Планируем загрузку прошивки в указанное время
     const delay = startDownloadDate - now;
     if (delay > 0) {
       setTimeout(downloadFirmware, delay);
@@ -377,22 +342,16 @@ client.handle('RemoteStartTransaction', async (payload) => {
     logger.info(`GetDiagnostics получен: ${JSON.stringify(payload)}`);
 
     const { location } = payload;
-
-    // Собираем диагностическую информацию
     const diagnosticsFilePath = path.join(__dirname, '../diagnostics/diagnostics.log');
 
-    // Убедимся, что директория существует
     if (!fs.existsSync(path.dirname(diagnosticsFilePath))) {
       fs.mkdirSync(path.dirname(diagnosticsFilePath), { recursive: true });
     }
 
-    // Записываем диагностическую информацию
     fs.writeFileSync(diagnosticsFilePath, 'Diagnostics information');
 
-    // Отправляем DiagnosticsStatusNotification со статусом 'Uploading'
-    await sendDiagnosticsStatusNotification('Uploading');
+    await sendDiagnosticsStatusNotification(client, 'Uploading');
 
-    // Загружаем файл на указанный сервер
     const uploadDiagnostics = () => {
       const fileStream = fs.createReadStream(diagnosticsFilePath);
       const protocol = location.startsWith('https') ? require('https') : require('http');
@@ -407,25 +366,23 @@ client.handle('RemoteStartTransaction', async (payload) => {
       const req = protocol.request(location, options, (res) => {
         if (res.statusCode === 200 || res.statusCode === 201) {
           logger.info('Диагностика успешно загружена.');
-          sendDiagnosticsStatusNotification('Uploaded');
+          sendDiagnosticsStatusNotification(client, 'Uploaded');
         } else {
           logger.error(`Ошибка загрузки диагностики. Код ответа: ${res.statusCode}`);
-          sendDiagnosticsStatusNotification('UploadFailed');
+          sendDiagnosticsStatusNotification(client, 'UploadFailed');
         }
       });
 
       req.on('error', (err) => {
         logger.error(`Ошибка загрузки диагностики: ${err.message}`);
-        sendDiagnosticsStatusNotification('UploadFailed');
+        sendDiagnosticsStatusNotification(client, 'UploadFailed');
       });
 
       fileStream.pipe(req);
     };
 
-    // Запускаем загрузку диагностики
     uploadDiagnostics();
 
-    // Возвращаем имя файла диагностики
     return { fileName: path.basename(diagnosticsFilePath) };
   });
 
@@ -433,17 +390,14 @@ client.handle('RemoteStartTransaction', async (payload) => {
   client.handle('Reset', async (payload) => {
     logger.info(`Reset получен: ${JSON.stringify(payload)}`);
 
-    const { type } = payload; // 'Soft' или 'Hard'
+    const { type } = payload;
     let status = 'Accepted';
 
-    // Выполняем Reset после проверки
     setTimeout(async () => {
-      // Отправляем сообщение об успешной перезагрузке
       logger.info(`Станция перезагружается (${type} reset).`);
 
       if (type === 'Soft') {
-        // Перезапускаем сервис
-        exec('systemctl restart charge', (error, stdout, stderr) => {
+        exec('systemctl restart charge', (error) => {
           if (error) {
             logger.error(`Ошибка при перезапуске сервиса: ${error.message}`);
           } else {
@@ -451,8 +405,7 @@ client.handle('RemoteStartTransaction', async (payload) => {
           }
         });
       } else if (type === 'Hard') {
-        // Перезагружаем контроллер
-        exec('systemctl reboot', (error, stdout, stderr) => {
+        exec('systemctl reboot', (error) => {
           if (error) {
             logger.error(`Ошибка при перезагрузке контроллера: ${error.message}`);
           } else {
@@ -477,9 +430,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
       return { status: 'UnlockFailed' };
     }
 
-    // Здесь мы можем реализовать логику разблокировки коннектора
-    // Например, отправить команду на разблокировку механизма
-
     logger.info(`Коннектор ${connectorId} успешно разблокирован.`);
 
     return { status: 'Unlocked' };
@@ -489,7 +439,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
   client.handle('ClearCache', async (payload) => {
     logger.info(`ClearCache получен: ${JSON.stringify(payload)}`);
 
-    // Очищаем локальный кэш авторизации
     localAuthList = { listVersion: 0, idTagList: [] };
     fs.writeFileSync(localAuthListPath, JSON.stringify(localAuthList, null, 2));
 
@@ -505,7 +454,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
     const { requestedMessage, connectorId } = payload;
     let status = 'Accepted';
 
-    // Обрабатываем запрошенное сообщение
     switch (requestedMessage) {
       case 'BootNotification':
         await client.call('BootNotification', {
@@ -519,10 +467,10 @@ client.handle('RemoteStartTransaction', async (payload) => {
       case 'StatusNotification':
         const connectorKey = `${config.stationName}_connector${connectorId}`;
         const connStatus = dev[connectorKey]?.status || 'Unavailable';
-        await sendStatusNotification(connectorId, connStatus, 'NoError');
+        await sendStatusNotification(client, connectorId, connStatus, 'NoError');
         break;
       case 'MeterValues':
-        await sendMeterValues(connectorId);
+        await sendMeterValues(client, connectorId);
         break;
       default:
         status = 'NotImplemented';
@@ -540,9 +488,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
     const { connectorId, csChargingProfiles } = payload;
     let status = 'Accepted';
 
-    // Здесь мы можем реализовать применение профиля зарядки
-    // Например, изменить настройки зарядки на основании профиля
-
     logger.info(`Профиль зарядки для коннектора ${connectorId} успешно применен.`);
 
     return { status };
@@ -554,9 +499,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
 
     const { connectorId, duration, chargingRateUnit } = payload;
 
-    // Здесь мы можем реализовать предоставление расписания зарядки
-    // Для простоты, мы возвращаем статус Rejected
-
     return { status: 'Rejected' };
   });
 
@@ -566,11 +508,9 @@ client.handle('RemoteStartTransaction', async (payload) => {
 
     const { listVersion, localAuthorizationList, updateType } = payload;
 
-    // Обновляем локальный список авторизации
     if (updateType === 'Full') {
       localAuthList.idTagList = localAuthorizationList || [];
     } else if (updateType === 'Differential') {
-      // Применяем изменения
       localAuthorizationList.forEach((item) => {
         const index = localAuthList.idTagList.findIndex((i) => i.idTag === item.idTag);
         if (index !== -1) {
@@ -581,12 +521,8 @@ client.handle('RemoteStartTransaction', async (payload) => {
       });
     }
 
-    // Обновляем версию списка
     localAuthList.listVersion = listVersion;
-
-    // Сохраняем локальный список авторизации
     fs.writeFileSync(localAuthListPath, JSON.stringify(localAuthList, null, 2));
-
     logger.info('Локальный список авторизации успешно обновлен.');
 
     return { status: 'Accepted' };
@@ -595,8 +531,6 @@ client.handle('RemoteStartTransaction', async (payload) => {
   // Обработчик GetLocalListVersion
   client.handle('GetLocalListVersion', async (payload) => {
     logger.info(`GetLocalListVersion получен: ${JSON.stringify(payload)}`);
-
-    // Возвращаем текущую версию локального списка
     return { listVersion: localAuthList.listVersion };
   });
 }

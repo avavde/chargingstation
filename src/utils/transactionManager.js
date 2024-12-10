@@ -1,16 +1,18 @@
+// src/utils/transactionManager.js
+
 const { controlRelay } = require('./relayControl');
-const { client } = require('../clients/ocppClient');
-const dev = require('../dev'); // Модуль для хранения состояния коннекторов
+const dev = require('../dev');
 const logger = require('./logger');
 const config = require('../config');
+const { sendStatusNotification } = require('./ocppUtils');
 
-async function startTransaction(connectorId, idTag) {
+// Теперь startTransaction и stopTransaction принимают client как аргумент
+async function startTransaction(client, connectorId, idTag) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
   dev[connectorKey].transactionId = Date.now();
   dev[connectorKey].status = 'Charging';
   dev[connectorKey].idTag = idTag;
 
-  // Управление реле
   const connector = config.connectors.find((c) => c.id === connectorId);
   controlRelay(connector.relayPath, true);
 
@@ -25,10 +27,10 @@ async function startTransaction(connectorId, idTag) {
   dev[connectorKey].transactionId = response.transactionId;
 
   // Отправка StatusNotification
-  await sendStatusNotification(connectorId, 'Charging', 'NoError');
+  await sendStatusNotification(client, connectorId, 'Charging', 'NoError');
 }
 
-async function stopTransaction(connectorId) {
+async function stopTransaction(client, connectorId) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
   const transactionId = dev[connectorKey].transactionId;
   const idTag = dev[connectorKey].idTag;
@@ -38,7 +40,6 @@ async function stopTransaction(connectorId) {
     return;
   }
 
-  // Управление реле
   const connector = config.connectors.find((c) => c.id === connectorId);
   controlRelay(connector.relayPath, false);
 
@@ -50,12 +51,11 @@ async function stopTransaction(connectorId) {
     timestamp: new Date().toISOString(),
   });
 
-  // Обновление статуса
   dev[connectorKey].transactionId = null;
   dev[connectorKey].status = 'Available';
 
   // Отправка StatusNotification
-  await sendStatusNotification(connectorId, 'Available', 'NoError');
+  await sendStatusNotification(client, connectorId, 'Available', 'NoError');
 }
 
 module.exports = {
