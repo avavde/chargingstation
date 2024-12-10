@@ -5,26 +5,19 @@ const logger = require('../utils/logger');
 const modbusClient = new ModbusRTU();
 
 async function initializeModbusClient() {
-  return new Promise((resolve, reject) => {
-    modbusClient.connectRTUBuffered(
-      config.modbusPort,
-      {
-        baudRate: config.modbusBaudRate,
-        dataBits: 8,
-        stopBits: 2,
-        parity: 'none',
-      },
-      (err) => {
-        if (err) {
-          logger.error(`Ошибка подключения к Modbus: ${err.message}`);
-          reject(err);
-        } else {
-          logger.info('Modbus успешно подключен.');
-          resolve();
-        }
-      }
-    );
-  });
+  try {
+    await modbusClient.connectRTUBuffered(config.modbusPort, {
+      baudRate: config.modbusBaudRate,
+      dataBits: 8,
+      parity: 'none',
+      stopBits: 1,
+    });
+    logger.info('Modbus-клиент успешно инициализирован.');
+  } catch (error) {
+    logger.error(`Ошибка подключения к Modbus: ${error.message}`);
+    // Не выбрасываем исключение, чтобы приложение продолжило работу
+    // Клиент остается в неинициализированном состоянии
+  }
 }
 
 async function readMeterSerialNumber(connector) {

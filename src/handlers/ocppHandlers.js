@@ -22,7 +22,7 @@ const extract = require('extract-zip'); // Пакет для распаковк�
 const configDir = path.join(__dirname, '../../config');
 const localAuthListPath = path.join(configDir, 'local_authorization_list.json');
 
-/
+
 if (!fs.existsSync(configDir)) {
   fs.mkdirSync(configDir, { recursive: true });
 }
@@ -92,34 +92,36 @@ function setupOCPPHandlers() {
 
 // Обработчик RemoteStartTransaction
 client.handle('RemoteStartTransaction', async (payload) => {
-    logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
-  
-    try {
-      const connectorId = payload.connectorId || 1;
-      const idTag = payload.idTag || 'Unknown';
-  
-      const connectorKey = `${config.stationName}_connector${connectorId}`;
-      const connector = config.connectors.find((c) => c.id === connectorId);
-  
-      if (!connector) {
-        logger.error(`Разъем с ID ${connectorId} не найден.`);
-        return { status: 'Rejected' };
-      }
-  
-      if (dev[connectorKey].status !== 'Available') {
-        logger.error(`Разъем ${connectorId} недоступен для зарядки.`);
-        return { status: 'Rejected' };
-      }
-  
-      await startTransaction(connectorId, idTag);
-  
-      return { status: 'Accepted' };
-    } catch (error) {
-      logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.stack || error}`);
+  logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
+
+  try {
+    const connectorId = payload.connectorId || 1;
+    const idTag = payload.idTag || 'Unknown';
+
+    const connectorKey = `${config.stationName}_connector${connectorId}`;
+    const connector = config.connectors.find((c) => c.id === connectorId);
+
+    if (!connector) {
+      logger.error(`Разъем с ID ${connectorId} не найден.`);
       return { status: 'Rejected' };
     }
-  });
-  
+
+    // Проверяем, доступен ли разъем
+    if (dev[connectorKey].status !== 'Available' || dev[connectorKey].availability !== 'Operative') {
+      logger.error(`Разъем ${connectorId} недоступен для зарядки.`);
+      return { status: 'Rejected' };
+    }
+
+    // Начинаем транзакцию
+    await startTransaction(connectorId, idTag);
+
+    return { status: 'Accepted' };
+  } catch (error) {
+    logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
+    return { status: 'Rejected' };
+  }
+});
+
 
   // Обработчик RemoteStopTransaction
   client.handle('RemoteStopTransaction', async (payload) => {

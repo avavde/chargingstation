@@ -1,46 +1,47 @@
-const { modbusClient } = require('../clients/modbusClient');
-const { startTransaction, stopTransaction } = require('./transactionManager');
-const dev = require('../dev');
-const config = require('../config');
-const logger = require('./logger');
+// src/utils/meterUtils.js
 
-async function updateModbusData() {
-  logger.info('Запуск функции updateModbusData()');
-  while (true) {
+const { modbusClient } = require('../clients/modbusClient');
+const config = require('../config');
+const dev = require('../dev');
+const logger = require('./logger');
+const { sendStatusNotification } = require('./ocppUtils');
+
+function updateModbusData() {
+  setInterval(async () => {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
       try {
+        // Устанавливаем адрес счетчика
         modbusClient.setID(connector.meterAddress);
 
+        // Читаем показания энергии
         const energyData = await modbusClient.readHoldingRegisters(connector.meterRegister, 2);
-        dev[connectorKey].Kwt = ((energyData.data[0] << 16) | energyData.data[1]) / 1000;
+        const energy = energyData.buffer.readFloatBE(0);
 
-        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 1);
-        dev[connectorKey].Current = currentData.data[0];
+        // Читаем показания тока
+        const currentData = await modbusClient.readHoldingRegisters(connector.currentRegister, 2);
+        const current = currentData.buffer.readFloatBE(0);
 
-        dev[connectorKey].Summ = dev[connectorKey].Kwt * config.pricePerKwh;
+        // Обновляем данные в dev
+        dev[connectorKey].Kwt = energy;
+        dev[connectorKey].Current = current;
 
-        logger.info(
-          `Разъем: ${connector.id}, Энергия: ${dev[connectorKey].Kwt} кВт·ч, Ток: ${dev[connectorKey].Current} А, Сумма: ${dev[connectorKey].Summ} руб.`
-        );
-
-        // Проверка подключения автомобиля
-        const vehicleConnected = dev[connectorKey].Current > 0;
-
-        if (vehicleConnected && dev[connectorKey].status === 'Available') {
-          await startTransaction(connector.id, 'LocalStart');
-        } else if (!vehicleConnected && dev[connectorKey].status === 'Charging') {
-          await stopTransaction(connector.id);
+        // Если коннектор был недоступен ранее, устанавливаем его в доступный статус
+        if (dev[connectorKey].status === 'Unavailable') {
+          dev[connectorKey].status = 'Available';
+          dev[connectorKey].availability = 'Operative';
+          await sendStatusNotification(connector.id, 'Available', 'NoError');
         }
-
-        // Отправка MeterValues
-        await sendMeterValues(connector.id);
       } catch (error) {
-        logger.error(`Ошибка обновления данных разъема ${connector.id}: ${error.message}`);
+        logger.error(`Ошибка при обновлении данных для коннектора ${connector.id}: ${error.message}`);
+
+        // Устанавливаем статус Inoperative для недоступного коннектора
+        dev[connectorKey].status = 'Unavailable';
+        dev[connectorKey].availability = 'Inoperative';
+        await sendStatusNotification(connector.id, 'Unavailable', 'NoError');
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
+  }, 5000); // Интервал обновления данных, например, каждые 5 секунд
 }
 
 module.exports = {
