@@ -6,7 +6,7 @@ const logger = require('./logger');
 const config = require('../config');
 const { sendStatusNotification } = require('./ocppUtils');
 
-// Теперь startTransaction и stopTransaction принимают client как аргумент
+// startTransaction и stopTransaction принимают client первым аргументом
 async function startTransaction(client, connectorId, idTag) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
   dev[connectorKey].transactionId = Date.now();
