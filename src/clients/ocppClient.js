@@ -6,6 +6,11 @@ const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = 
 
 let client;
 
+/**
+ * Инициализация OCPP-клиента и подключение к центральной системе.
+ * После установления соединения отправляет BootNotification, начальные StatusNotification
+ * и запускает периодическую отправку Heartbeat.
+ */
 async function initializeOCPPClient() {
   return new Promise((resolve, reject) => {
     try {
@@ -14,7 +19,7 @@ async function initializeOCPPClient() {
       client = new RPCClient({
         endpoint: config.centralSystemUrl,
         identity: config.stationName,
-        protocols: ['ocpp1.6'],
+        protocols: ['ocpp1.6']
       });
 
       logger.info(`OCPP-клиент инициализирован с endpoint: ${config.centralSystemUrl}`);
@@ -55,100 +60,113 @@ async function initializeOCPPClient() {
         logger.warn('WebSocket-соединение закрыто.');
       });
 
-      // Логирование всех входящих и исходящих сообщений
-      client.on('message', (message) => {
+      // Обработчик всех входящих/исходящих сообщений
+      client.on('message', (rawMsg) => {
+        // rawMsg: { message: '["..."]', outbound: boolean }
+        logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(rawMsg, null, 2)}`);
         try {
-          logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(message, null, 2)}`);
-      
-          let parsedMessage = Array.isArray(message) ? message : JSON.parse(message);
-      
-          if (!Array.isArray(parsedMessage)) {
-            throw new Error('Входящее сообщение имеет неверный формат.');
+          const rawMessageStr = rawMsg.message;
+          if (typeof rawMessageStr !== 'string') {
+            throw new Error('Отсутствует корректная строка для парсинга.');
           }
-      
-          const [messageType, messageId, payload] = parsedMessage;
-      
+
+          const parsedMessage = JSON.parse(rawMessageStr);
+          if (!Array.isArray(parsedMessage)) {
+            throw new Error('Входящее сообщение имеет неверный формат. Ожидался массив.');
+          }
+
+          const [messageType, messageId, ...rest] = parsedMessage;
+
           if (messageType === 2) {
+            // OCPP Call (Request)
+            const [action, payload = {}] = rest;
             logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
               type: 'Request',
               messageId,
-              method: payload,
-              payload: parsedMessage[3] || {}
+              method: action,
+              payload
             }, null, 2)}`);
           } else if (messageType === 3) {
+            // OCPP CallResult (Response)
+            const [payload = {}] = rest;
             logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
               type: 'Response',
               messageId,
               payload
             }, null, 2)}`);
           } else if (messageType === 4) {
+            // OCPP CallError
+            const [errorDetails] = rest;
             logger.error(`Ошибка в сообщении OCPP: ${JSON.stringify({
               type: 'Error',
               messageId,
-              details: payload
+              details: errorDetails
             }, null, 2)}`);
           } else {
             throw new Error(`Неизвестный тип сообщения: ${messageType}`);
           }
         } catch (error) {
           logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
-          logger.error(`Содержимое сообщения: ${JSON.stringify(message, null, 2)}`);
+          logger.error(`Содержимое сообщения: ${JSON.stringify(rawMsg, null, 2)}`);
         }
       });
-      
 
       // Обработчик входящих запросов
-      client.on('request', (request) => {
+      client.on('request', (rawReq) => {
         try {
-          const [messageType, messageId, method, payload] = request;
+          const parsedReq = JSON.parse(rawReq.message);
+          if (!Array.isArray(parsedReq)) {
+            throw new Error('Некорректный формат запроса OCPP.');
+          }
 
-          logger.info(
-            `Входящий запрос OCPP:\n${JSON.stringify(
-              {
-                type: 'Request',
-                messageId: messageId || 'N/A',
-                method: method || 'Unknown',
-                payload: payload || {},
-              },
-              null,
-              2
-            )}`
-          );
+          const [messageType, messageId, method, payload] = parsedReq;
+
+          logger.info(`Входящий запрос OCPP:\n${JSON.stringify({
+            type: 'Request',
+            messageId: messageId || 'N/A',
+            method: method || 'Unknown',
+            payload: payload || {}
+          }, null, 2)}`);
         } catch (error) {
           logger.error(`Ошибка при обработке входящего запроса: ${error.message}`);
-          logger.error(`Содержимое запроса: ${JSON.stringify(request, null, 2)}`);
+          logger.error(`Содержимое запроса: ${JSON.stringify(rawReq, null, 2)}`);
         }
       });
 
       // Обработчик входящих ответов
-      client.on('response', (response) => {
+      client.on('response', (rawRes) => {
         try {
-          const [messageType, messageId, payload] = response;
+          const parsedRes = JSON.parse(rawRes.message);
+          if (!Array.isArray(parsedRes)) {
+            throw new Error('Некорректный формат ответа OCPP.');
+          }
 
-          logger.info(
-            `Входящий ответ OCPP:\n${JSON.stringify(
-              {
-                type: 'Response',
-                messageId: messageId || 'N/A',
-                payload: payload || {},
-              },
-              null,
-              2
-            )}`
-          );
+          const [messageType, messageId, payload] = parsedRes;
+
+          logger.info(`Входящий ответ OCPP:\n${JSON.stringify({
+            type: 'Response',
+            messageId: messageId || 'N/A',
+            payload: payload || {}
+          }, null, 2)}`);
         } catch (error) {
           logger.error(`Ошибка при обработке ответа: ${error.message}`);
-          logger.error(`Содержимое ответа: ${JSON.stringify(response, null, 2)}`);
+          logger.error(`Содержимое ответа: ${JSON.stringify(rawRes, null, 2)}`);
         }
       });
 
       // Обработчик исходящих вызовов
-      client.on('call', (call) => {
+      client.on('call', (rawCall) => {
         try {
-          logger.info(`Исходящий вызов OCPP:\n${JSON.stringify(call, null, 2)}`);
+          const parsedCall = JSON.parse(rawCall.message);
+          if (!Array.isArray(parsedCall)) {
+            throw new Error('Некорректный формат исходящего вызова OCPP.');
+          }
+
+          logger.info(`Исходящий вызов OCPP:\n${JSON.stringify(parsedCall, null, 2)}`);
+
         } catch (error) {
           logger.error(`Ошибка при обработке исходящего вызова: ${error.message}`);
-          logger.error(`Содержимое вызова: ${JSON.stringify(call, null, 2)}`);
+          logger.error(`Содержимое вызова: ${JSON.stringify(rawCall, null, 2)}`);
         }
       });
 
@@ -164,6 +182,10 @@ async function initializeOCPPClient() {
   });
 }
 
+/**
+ * Возвращает экземпляр OCPP-клиента.
+ * Если клиент еще не инициализирован, генерируется ошибка.
+ */
 function getClient() {
   if (!client) {
     throw new Error('OCPP-клиент еще не инициализирован.');
