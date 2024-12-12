@@ -178,41 +178,41 @@ function setupOCPPHandlers(client) {
   });
 
   // Обработчик ChangeConfiguration
-  
+
   client.handle('ChangeConfiguration', async (payload) => {
     logger.info(`ChangeConfiguration получен: ${JSON.stringify(payload)}`);
   
     const { key, value } = payload;
     let status = 'Accepted';
   
-    // Список поддерживаемых и доступных для изменения ключей
+    // Список поддерживаемых и допустимых для изменения ключей
     const allowedKeys = ['AllowOfflineTxForUnknownId', 'AuthorizationCacheEnabled', 'pricePerKwh', 'connectors'];
     const readOnlyKeys = ['stationName', 'vendor'];
   
     try {
-      // Проверка на ключи только для чтения
+      // Проверка ключей только для чтения
       if (readOnlyKeys.includes(key)) {
         status = 'Rejected';
         logger.error(`Ключ ${key} является только для чтения.`);
       }
-      // Проверка на допустимые ключи
+      // Проверка допустимых ключей
       else if (!allowedKeys.includes(key)) {
         status = 'Rejected';
         logger.error(`Ключ ${key} не поддерживается для изменения.`);
       }
-      // Обработка специального ключа 'connectors'
+      // Обработка ключа connectors
       else if (key === 'connectors') {
         try {
           const parsedValue = JSON.parse(value); // Парсим JSON-строку
           if (Array.isArray(parsedValue)) {
-            config[key] = parsedValue; // Обновляем конфигурацию
+            config.connectors = parsedValue; // Обновляем конфигурацию
             fs.writeFileSync(
               path.join(__dirname, '../../config/ocpp_config.json'),
               JSON.stringify(config, null, 2)
             );
             logger.info(`Ключ ${key} успешно обновлен: ${JSON.stringify(parsedValue)}`);
           } else {
-            throw new Error('Значение ключа connectors должно быть массивом.');
+            throw new Error('Значение ключа connectors должно быть массивом объектов.');
           }
         } catch (error) {
           logger.error(`Ошибка при обработке ключа connectors: ${error.message}`);
