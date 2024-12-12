@@ -112,48 +112,39 @@ async function sendDiagnosticsStatusNotification(client, status) {
 }
 
 async function sendMeterValues(client, connectorId) {
-  if (!client) {
-    logger.warn(`Попытка отправить MeterValues без клиента для коннектора ${connectorId}.`);
-    return;
-  }
-
-  const connectorKey = `${config.stationName}_connector${connectorId}`;
-  if (!dev[connectorKey].transactionId) {
-    // Если транзакция не запущена, MeterValues не отправляем
-    return;
-  }
-
   try {
-    const response = await client.call('MeterValues', {
+    // Проверяем, активна ли транзакция для данного коннектора
+    const transactionData = dev[`connector_${connectorId}`];
+    if (!transactionData || !transactionData.transactionId || !transactionData.active) {
+      logger.warn(`Отправка MeterValues пропущена: Нет активной транзакции для connectorId=${connectorId}`);
+      return;
+    }
+
+    // Читаем показания счетчика с использованием Modbus
+    const meterValue = await modbusClient.readRegister(connectorId, config.meterRegister);
+    logger.info(
+      `Отправка MeterValues: connectorId=${connectorId}, transactionId=${transactionData.transactionId}, meterValue=${meterValue}`
+    );
+
+    // Формируем payload с transactionId
+    const payload = {
       connectorId,
-      transactionId: dev[connectorKey].transactionId,
+      transactionId: transactionData.transactionId,
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: [
-            {
-              value: dev[connectorKey].Kwt.toString(),
-              context: 'Sample.Periodic',
-              format: 'Raw',
-              measurand: 'Energy.Active.Import.Register',
-              unit: 'kWh',
-            },
-            {
-              value: dev[connectorKey].Current.toString(),
-              context: 'Sample.Periodic',
-              format: 'Raw',
-              measurand: 'Current.Import',
-              unit: 'A',
-            }
-          ],
+          sampledValue: [{ value: meterValue.toString() }],
         },
       ],
-    });
-    logger.info(`MeterValues отправлен для коннектора ${connectorId}. Ответ: ${JSON.stringify(response, null, 2)}`);
+    };
+
+    // Отправка сообщения MeterValues
+    await client.call('MeterValues', payload);
   } catch (error) {
-    logger.error(`Ошибка отправки MeterValues для коннектора ${connectorId}: ${error.message}`);
+    logger.error(`Ошибка при отправке MeterValues: ${error.message}`);
   }
 }
+
 
 async function sendInitialStatusNotifications(client) {
   if (!client) {
