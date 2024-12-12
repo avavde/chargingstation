@@ -32,12 +32,12 @@ async function initializeModbusClient() {
   try {
     logger.info('Инициализация Modbus-клиента...');
     await modbusClient.connectRTUBuffered(config.modbusPort, {
-      baudRate: config.modbusBaudRate,
-      dataBits: 8,
-      parity: 'none',
-      stopBits: 1,
+      baudRate: config.modbusBaudRate, // 9600
+      dataBits: config.modbusDataBits, // 8
+      parity: config.modbusParity,     // 'none'
+      stopBits: config.modbusStopBits, // 2
     });
-    modbusClient.setTimeout(1000); // 1 секунда таймаут
+    modbusClient.setTimeout(2000); // Увеличенный таймаут 2 сек
     logger.info('Modbus-клиент успешно инициализирован.');
   } catch (error) {
     logger.error(`Ошибка при инициализации Modbus-клиента: ${error.message}`);
