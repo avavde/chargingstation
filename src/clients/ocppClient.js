@@ -74,12 +74,17 @@ async function initializeOCPPClient() {
         try {
           let parsedMessage;
       
-          // Проверка: если сообщение - строка, парсим JSON
-          if (typeof message === 'string') {
+          // Проверка: если сообщение - объект с ключом "message", разбираем содержимое
+          if (message && message.message) {
+            parsedMessage = JSON.parse(message.message);
+          } else if (typeof message === 'string') {
             parsedMessage = JSON.parse(message);
           } else {
-            // Сообщение уже объект, используем напрямую
             parsedMessage = message;
+          }
+      
+          if (!Array.isArray(parsedMessage)) {
+            throw new Error('Входящее сообщение имеет неверный формат');
           }
       
           const [messageType, messageId, actionOrPayload] = parsedMessage;
@@ -109,10 +114,12 @@ async function initializeOCPPClient() {
           logger.info(`Входящее сообщение OCPP: ${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
           logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
-          logger.error(`Содержимое сообщения: ${typeof message === 'string' ? message : JSON.stringify(message)}`);
+          logger.error(
+            `Содержимое сообщения: ${typeof message === 'string' ? message : JSON.stringify(message)}`
+          );
         }
       });
-
+      
       client.on('request', (request) => {
         try {
           const [messageType, messageId, method, payload] = request;
