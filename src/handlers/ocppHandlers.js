@@ -79,34 +79,26 @@ function setupOCPPHandlers(client) {
     return { status: 'Accepted', data: 'Data processed' };
   });
 
-  // Обработчик RemoteStartTransaction
   client.handle('RemoteStartTransaction', async (payload) => {
     logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
-    
+  
     try {
       const connectorId = Number(payload.connectorId) || 1;
-      const idTag = payload.idTag || 'Unknown';
+      const idTag = payload.idTag; // Используем idTag из запроса
   
-      logger.debug(`Запрос RemoteStartTransaction: connectorId=${connectorId}, idTag=${idTag}`);
+      logger.info(`Запуск транзакции для коннектора ${connectorId} с idTag ${idTag}`);
   
-      const connectorKey = `${config.stationName}_connector${connectorId}`;
+      // Проверка доступности коннектора
       const connector = config.connectors.find((c) => c.id === connectorId);
-  
       if (!connector) {
         logger.error(`Коннектор ${connectorId} не найден в конфигурации.`);
         return { status: 'Rejected' };
       }
   
-      if (dev[connectorKey]?.status !== 'Available') {
-        logger.error(`Коннектор ${connectorId} недоступен для зарядки. Текущий статус: ${dev[connectorKey]?.status}`);
-        return { status: 'Rejected' };
-      }
-  
-      await startTransaction(client, connectorId, idTag);
-      logger.info(`Транзакция успешно начата на коннекторе ${connectorId}.`);
+      await startTransaction(client, connectorId, idTag); // Передаем корректный idTag
       return { status: 'Accepted' };
     } catch (error) {
-      logger.error(`Ошибка в RemoteStartTransaction: ${error.message}`);
+      logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
       return { status: 'Rejected' };
     }
   });
