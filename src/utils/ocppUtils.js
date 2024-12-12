@@ -113,40 +113,29 @@ async function sendDiagnosticsStatusNotification(client, status) {
 }
 
 async function sendMeterValues(client, connectorId) {
-  try {
-    // Проверяем, активна ли транзакция для данного коннектора
-    const transactionData = dev[`connector_${connectorId}`];
-    if (!transactionData || !transactionData.transactionId || !transactionData.active) {
-      logger.warn(`Отправка MeterValues пропущена: Нет активной транзакции для connectorId=${connectorId}`);
-      return;
-    }
+  const connectorKey = `${config.stationName}_connector${connectorId}`;
+  const { transactionId } = dev[connectorKey];
 
-    // Читаем показания счётчика с использованием Modbus
-    const meterValueData = await readWithTimeout(config.meterRegister, 2, 2000); // Используем правильный метод
-    const meterReading = meterValueData.data[0]; // Предполагаем, что первый регистр содержит kWh
-
-    logger.info(
-      `Отправка MeterValues: connectorId=${connectorId}, transactionId=${transactionData.transactionId}, meterValue=${meterReading}`
-    );
-
-    // Формируем payload с transactionId
-    const payload = {
-      connectorId,
-      transactionId: transactionData.transactionId,
-      meterValue: [
-        {
-          timestamp: new Date().toISOString(),
-          sampledValue: [{ value: meterReading.toString() }],
-        },
-      ],
-    };
-
-    // Отправка сообщения MeterValues
-    await client.call('MeterValues', payload);
-    logger.info(`MeterValues отправлены для connectorId=${connectorId}`);
-  } catch (error) {
-    logger.error(`Ошибка при отправке MeterValues: ${error.message}`);
+  if (!transactionId) {
+    logger.warn(`Отправка MeterValues пропущена: Нет активной транзакции для connectorId=${connectorId}`);
+    return;
   }
+
+  const meterReading = await readWithTimeout(config.connectors.find(c => c.id === connectorId).meterRegister);
+
+  const payload = {
+    connectorId,
+    transactionId,
+    meterValue: [
+      {
+        timestamp: new Date().toISOString(),
+        sampledValue: [{ value: meterReading.toString() }],
+      },
+    ],
+  };
+
+  await client.call('MeterValues', payload);
+  logger.info(`MeterValues отправлены для connectorId=${connectorId}`);
 }
 
 async function sendInitialStatusNotifications(client) {

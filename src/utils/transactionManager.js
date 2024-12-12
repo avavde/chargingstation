@@ -1,62 +1,44 @@
-// src/utils/transactionManager.js
-
 const { controlRelay } = require('./relayControl');
 const dev = require('../dev');
 const logger = require('./logger');
 const config = require('../config');
 const { sendStatusNotification } = require('./ocppUtils');
-const { getMeterReading } = require('../clients/modbusClient'); // Убедитесь, что эта функция существует и работает
+const { getMeterReading } = require('../clients/modbusClient');
 
 async function startTransaction(client, connectorId, idTag) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
-  
+
   if (!dev[connectorKey]) {
-    dev[connectorKey] = {
-      status: 'Available',
-      meterStart: 0,
-      transactionId: null,
-      idTag: null,
-      active: false,
-      meterInterval: null
-    };
+    logger.error(`Коннектор ${connectorId} не найден в конфигурации.`);
+    return { idTagInfo: { status: 'Rejected' } };
   }
 
-  // Считываем текущее показание счётчика в кВт·ч для начала транзакции
-  const currentMeterValue = await getMeterReading(connectorId); // Передаём connectorId, если требуется
+  // Считываем начальные показания
+  const meterStart = await getMeterReading(connectorId);
 
-  dev[connectorKey].status = 'Preparing'; 
+  dev[connectorKey].status = 'Preparing';
   dev[connectorKey].idTag = idTag;
-  dev[connectorKey].meterStart = currentMeterValue; 
-  dev[connectorKey].transactionId = null;
-  dev[connectorKey].active = false;
 
-  const connector = config.connectors.find((c) => c.id === connectorId);
-  controlRelay(connector.relayPath, true); // Включаем реле для подачи напряжения
-
-  // Отправка StartTransaction
   const response = await client.call('StartTransaction', {
     connectorId,
     idTag,
-    meterStart: Math.round(currentMeterValue * 1000), 
+    meterStart: Math.round(meterStart * 1000),
     timestamp: new Date().toISOString(),
   });
 
-  // Проверяем статус idTagInfo
   if (!response.idTagInfo || response.idTagInfo.status !== 'Accepted') {
-    logger.error(`StartTransaction не принят для idTag=${idTag}, статус=${response.idTagInfo?.status || 'Unknown'}. Отключаем реле.`);
-    controlRelay(connector.relayPath, false);
+    logger.error(`StartTransaction отклонен для idTag=${idTag}.`);
+    controlRelay(config.connectors.find(c => c.id === connectorId).relayPath, false);
     dev[connectorKey].status = 'Available';
-    dev[connectorKey].transactionId = null;
     dev[connectorKey].idTag = null;
-    return null;
+    return response;
   }
 
-  // Если Accepted, сохраняем transactionId
+  // Сохраняем transactionId и статус Charging
   dev[connectorKey].transactionId = response.transactionId;
   dev[connectorKey].status = 'Charging';
-  dev[connectorKey].active = true;
+  dev[connectorKey].meterStart = meterStart;
 
-  // Отправляем StatusNotification (Charging)
   await sendStatusNotification(client, connectorId, 'Charging', 'NoError');
 
   return response;
@@ -64,35 +46,26 @@ async function startTransaction(client, connectorId, idTag) {
 
 async function stopTransaction(client, connectorId) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
-  const transactionId = dev[connectorKey]?.transactionId;
-  const idTag = dev[connectorKey]?.idTag;
+  const { transactionId, idTag } = dev[connectorKey];
 
   if (!transactionId) {
-    logger.error(`Нет активной транзакции на разъеме ${connectorId}`);
+    logger.warn(`Нет активной транзакции для connectorId=${connectorId}`);
     return;
   }
 
-  const connector = config.connectors.find((c) => c.id === connectorId);
-  controlRelay(connector.relayPath, false); // Выключаем реле, прекращаем зарядку
-
-  // Считываем текущее показание счётчика для завершения транзакции
-  const currentMeterValue = await getMeterReading(connectorId);
-
-  // Отправка StopTransaction
+  const meterStop = await getMeterReading(connectorId);
   await client.call('StopTransaction', {
     transactionId,
     idTag,
-    meterStop: Math.round(currentMeterValue * 1000),
+    meterStop: Math.round(meterStop * 1000),
     timestamp: new Date().toISOString(),
   });
 
+  // Сброс состояния коннектора
   dev[connectorKey].transactionId = null;
   dev[connectorKey].status = 'Available';
-  dev[connectorKey].active = false;
-  dev[connectorKey].meterStart = 0;
   dev[connectorKey].idTag = null;
 
-  // Отправка StatusNotification (Available)
   await sendStatusNotification(client, connectorId, 'Available', 'NoError');
 }
 
