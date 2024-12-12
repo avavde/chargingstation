@@ -121,22 +121,47 @@ async function sendMeterValues(client, connectorId) {
     return;
   }
 
-  const meterReading = await readWithTimeout(config.connectors.find(c => c.id === connectorId).meterRegister);
+  try {
+    // Чтение реального значения счётчика
+    const connector = config.connectors.find(c => c.id === connectorId);
+    const meterData = await readWithTimeout(connector.meterRegister, 2, 1000);
 
-  const payload = {
-    connectorId,
-    transactionId,
-    meterValue: [
-      {
-        timestamp: new Date().toISOString(),
-        sampledValue: [{ value: meterReading.toString() }],
-      },
-    ],
-  };
+    // Обрабатываем данные: конвертируем в float
+    const meterReading = meterData.buffer.readFloatBE(0);
+    const meterValue = meterReading.toFixed(3); // Округляем до 3 знаков после запятой
 
-  await client.call('MeterValues', payload);
-  logger.info(`MeterValues отправлены для connectorId=${connectorId}`);
+    logger.info(`MeterValues: connectorId=${connectorId}, value=${meterValue} kWh`);
+
+    // Формирование payload для MeterValues
+    const payload = {
+      connectorId,
+      transactionId,
+      meterValue: [
+        {
+          timestamp: new Date().toISOString(),
+          sampledValue: [
+            {
+              value: meterValue, // Значение должно быть строкой с числом
+              context: "Sample.Periodic", // Контекст: регулярное измерение
+              format: "Raw",
+              measurand: "Energy.Active.Import.Register", // OCPP 1.6 стандартный measurand
+              unit: "kWh" // Единица измерения
+            }
+          ]
+        }
+      ]
+    };
+
+    // Отправка данных в центральную систему
+    await client.call('MeterValues', payload);
+    logger.info(`MeterValues отправлены для connectorId=${connectorId}, value=${meterValue} kWh`);
+
+  } catch (error) {
+    logger.error(`Ошибка при отправке MeterValues для connectorId=${connectorId}: ${error.message}`);
+  }
 }
+
+
 
 async function sendInitialStatusNotifications(client) {
   if (!client) {
