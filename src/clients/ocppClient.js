@@ -119,22 +119,27 @@ async function initializeOCPPClient() {
           );
         }
       });
-      
-      client.on('request', (request) => {
-        try {
-          const [messageType, messageId, method, payload] = request;
-          const logDetails = {
-            type: 'Request',
-            messageId,
-            method,
-            payload,
-          };
-      
-          logger.info(`Входящий запрос: ${JSON.stringify(logDetails, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке запроса: ${error.message}`);
-        }
-      });
+
+client.on('request', (request) => {
+  try {
+    // Деконструируем входящий запрос
+    const [messageType, messageId, method, payload] = request;
+
+    // Формируем удобный для чтения лог
+    const logDetails = {
+      type: 'Request',
+      messageId: messageId || 'N/A',
+      method: method || 'Unknown',
+      payload: payload || {},
+    };
+
+    // Логируем входящий запрос на уровне info
+    logger.info(`Входящий запрос OCPP:\n${JSON.stringify(logDetails, null, 2)}`);
+  } catch (error) {
+    logger.error(`Ошибка при обработке запроса: ${error.message}`);
+    logger.error(`Содержимое запроса: ${JSON.stringify(request)}`);
+  }
+});
 
       client.on('response', (response) => {
         logger.info(`Исходящий ответ OCPP: ${JSON.stringify(response)}`);
