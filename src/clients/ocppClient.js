@@ -59,46 +59,43 @@ async function initializeOCPPClient() {
       client.on('message', (message) => {
         try {
           logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(message, null, 2)}`);
-
-          const parsedMessage = JSON.parse(
-            message.message || (typeof message === 'string' ? message : JSON.stringify(message))
-          );
-
+      
+          let parsedMessage = Array.isArray(message) ? message : JSON.parse(message);
+      
           if (!Array.isArray(parsedMessage)) {
-            throw new Error('Сообщение имеет неверный формат OCPP.');
+            throw new Error('Входящее сообщение имеет неверный формат.');
           }
-
-          const [messageType, messageId, methodOrPayload, payload] = parsedMessage;
-
-          let logDetails = {};
-          if (messageType === 2) { // Запрос
-            logDetails = {
+      
+          const [messageType, messageId, payload] = parsedMessage;
+      
+          if (messageType === 2) {
+            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
               type: 'Request',
               messageId,
-              method: methodOrPayload,
-              payload: payload || {},
-            };
-          } else if (messageType === 3) { // Ответ
-            logDetails = {
+              method: payload,
+              payload: parsedMessage[3] || {}
+            }, null, 2)}`);
+          } else if (messageType === 3) {
+            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
               type: 'Response',
               messageId,
-              payload: methodOrPayload,
-            };
-          } else if (messageType === 4) { // Ошибка
-            logDetails = {
+              payload
+            }, null, 2)}`);
+          } else if (messageType === 4) {
+            logger.error(`Ошибка в сообщении OCPP: ${JSON.stringify({
               type: 'Error',
               messageId,
-              errorDetails: methodOrPayload,
-              payload: parsedMessage[4] || {},
-            };
+              details: payload
+            }, null, 2)}`);
+          } else {
+            throw new Error(`Неизвестный тип сообщения: ${messageType}`);
           }
-
-          logger.info(`Полное входящее сообщение OCPP:\n${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
           logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
           logger.error(`Содержимое сообщения: ${JSON.stringify(message, null, 2)}`);
         }
       });
+      
 
       // Обработчик входящих запросов
       client.on('request', (request) => {
