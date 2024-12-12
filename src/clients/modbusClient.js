@@ -7,24 +7,26 @@ const dev = require('../dev');
 const modbusClient = new ModbusRTU();
 
 // Таймаут для чтения регистров
-async function readWithTimeout(register, length = 2, timeout = 1000) {
+async function readWithTimeout(register, length = 2, timeout = 2000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error('Modbus таймаут'));
     }, timeout);
 
-    modbusClient.readHoldingRegisters(register, length)
-      .then((data) => {
-        clearTimeout(timer);
-        resolve(data);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
+    // Добавляем минимальную паузу перед чтением
+    setTimeout(() => {
+      modbusClient.readInputRegisters(register, length) // Читаем input register
+        .then((data) => {
+          clearTimeout(timer);
+          resolve(data);
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          reject(new Error(`Ошибка Modbus: ${error.message}`));
+        });
+    }, 100);
   });
 }
-
 // Инициализация Modbus клиента
 async function initializeModbusClient() {
   try {
