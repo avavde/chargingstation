@@ -1,27 +1,11 @@
-// src/clients/ocppClient.js
-
 const { RPCClient } = require('ocpp-rpc');
 const logger = require('../utils/logger');
 const config = require('../config');
-const dev = require('../dev');
-const { controlRelay } = require('../utils/relayControl');
-const { readMeterSerialNumber } = require('../clients/modbusClient');
 const { getModemInfo } = require('../clients/modemClient');
-const { startTransaction, stopTransaction } = require('../utils/transactionManager');
-const {
-  sendBootNotification,
-  sendStatusNotification,
-  sendHeartbeat,
-  sendFirmwareStatusNotification,
-  sendDiagnosticsStatusNotification,
-  sendMeterValues,
-  sendInitialStatusNotifications,
-} = require('../utils/ocppUtils');
-const { updateModbusData } = require('../utils/meterUtils');
-const { checkReservations, reservations } = require('../utils/reservationManager');
-const { setupOCPPHandlers } = require('../handlers/ocppHandlers');
+const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = require('../utils/ocppUtils');
 
 let client;
+
 async function initializeOCPPClient() {
   return new Promise((resolve, reject) => {
     try {
@@ -35,7 +19,7 @@ async function initializeOCPPClient() {
 
       logger.info(`OCPP-клиент инициализирован с endpoint: ${config.centralSystemUrl}`);
 
-      // Логирование событий подключения
+      // Обработчик открытия WebSocket-соединения
       client.on('open', async () => {
         logger.info('WebSocket-соединение с центральной системой установлено.');
         try {
@@ -48,7 +32,7 @@ async function initializeOCPPClient() {
           await sendInitialStatusNotifications(client);
           logger.info('StatusNotification успешно отправлены.');
 
-          // Запуск Heartbeat
+          // Периодическая отправка Heartbeat
           setInterval(() => {
             logger.info('Отправка Heartbeat...');
             sendHeartbeat(client);
@@ -61,72 +45,66 @@ async function initializeOCPPClient() {
         }
       });
 
+      // Обработчик ошибок WebSocket
       client.on('error', (error) => {
         logger.error(`WebSocket ошибка: ${error.message}`);
       });
 
+      // Обработчик закрытия WebSocket
       client.on('close', () => {
         logger.warn('WebSocket-соединение закрыто.');
       });
 
-      // Полное логирование входящих и исходящих сообщений
+      // Логирование всех входящих и исходящих сообщений
       client.on('message', (message) => {
         try {
-          let parsedMessage;
-      
-          // Полное логирование входящего сообщения
           logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(message, null, 2)}`);
-      
-          if (message && message.message) {
-            parsedMessage = JSON.parse(message.message);
-          } else if (typeof message === 'string') {
-            parsedMessage = JSON.parse(message);
-          } else {
-            parsedMessage = message;
-          }
-      
+
+          const parsedMessage = JSON.parse(
+            message.message || (typeof message === 'string' ? message : JSON.stringify(message))
+          );
+
           if (!Array.isArray(parsedMessage)) {
-            throw new Error('Входящее сообщение имеет неверный формат');
+            throw new Error('Сообщение имеет неверный формат OCPP.');
           }
-      
-          const [messageType, messageId, actionOrPayload, payload] = parsedMessage;
-      
+
+          const [messageType, messageId, methodOrPayload, payload] = parsedMessage;
+
           let logDetails = {};
           if (messageType === 2) { // Запрос
             logDetails = {
               type: 'Request',
               messageId,
-              method: actionOrPayload,
+              method: methodOrPayload,
               payload: payload || {},
             };
           } else if (messageType === 3) { // Ответ
             logDetails = {
               type: 'Response',
               messageId,
-              payload: actionOrPayload,
+              payload: methodOrPayload,
             };
           } else if (messageType === 4) { // Ошибка
             logDetails = {
               type: 'Error',
               messageId,
-              errorDetails: actionOrPayload,
+              errorDetails: methodOrPayload,
               payload: parsedMessage[4] || {},
             };
           }
-      
+
           logger.info(`Полное входящее сообщение OCPP:\n${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
           logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
-          logger.error(
-            `Содержимое сообщения: ${typeof message === 'string' ? message : JSON.stringify(message, null, 2)}`
-          );
+          logger.error(`Содержимое сообщения: ${JSON.stringify(message, null, 2)}`);
         }
       });
-      
+
+      // Обработчик входящих запросов
       client.on('request', (request) => {
         try {
           const [messageType, messageId, method, payload] = request;
-      
+
           logger.info(
             `Входящий запрос OCPP:\n${JSON.stringify(
               {
@@ -144,13 +122,14 @@ async function initializeOCPPClient() {
           logger.error(`Содержимое запроса: ${JSON.stringify(request, null, 2)}`);
         }
       });
-      
+
+      // Обработчик входящих ответов
       client.on('response', (response) => {
         try {
           const [messageType, messageId, payload] = response;
-      
+
           logger.info(
-            `Исходящий ответ OCPP:\n${JSON.stringify(
+            `Входящий ответ OCPP:\n${JSON.stringify(
               {
                 type: 'Response',
                 messageId: messageId || 'N/A',
@@ -165,7 +144,8 @@ async function initializeOCPPClient() {
           logger.error(`Содержимое ответа: ${JSON.stringify(response, null, 2)}`);
         }
       });
-      
+
+      // Обработчик исходящих вызовов
       client.on('call', (call) => {
         try {
           logger.info(`Исходящий вызов OCPP:\n${JSON.stringify(call, null, 2)}`);
@@ -173,13 +153,6 @@ async function initializeOCPPClient() {
           logger.error(`Ошибка при обработке исходящего вызова: ${error.message}`);
           logger.error(`Содержимое вызова: ${JSON.stringify(call, null, 2)}`);
         }
-      });
-      client.on('response', (response) => {
-        logger.info(`Исходящий ответ OCPP: ${JSON.stringify(response)}`);
-      });
-
-      client.on('call', (call) => {
-        logger.info(`Исходящий вызов: ${JSON.stringify(call)}`);
       });
 
       logger.info('Подключаемся к OCPP-серверу...');
