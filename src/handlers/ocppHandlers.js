@@ -215,7 +215,7 @@ function setupOCPPHandlers(client) {
         configurationKey.push({
           key: k,
           readonly: false,
-          value: v.toString(),
+          value: k === 'connectors' ? JSON.stringify(v) : v.toString(), // Сериализация для connectors
         });
       }
     } else {
