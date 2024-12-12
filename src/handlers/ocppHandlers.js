@@ -82,30 +82,35 @@ function setupOCPPHandlers(client) {
   // Обработчик RemoteStartTransaction
   client.handle('RemoteStartTransaction', async (payload) => {
     logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
-
+  
     try {
-      const connectorId = payload.connectorId || 1;
+      const connectorId = payload.connectorId || 1; // Используем ID из запроса
       const idTag = payload.idTag || 'Unknown';
-
-      const connectorKey = `${config.stationName}_connector${connectorId}`;
+  
+      // Логируем входящие данные
+      logger.debug(`RemoteStartTransaction параметры: connectorId=${connectorId}, idTag=${idTag}`);
+  
+      // Проверяем наличие коннектора
       const connector = config.connectors.find((c) => c.id === connectorId);
-
       if (!connector) {
-        logger.error(`Разъем с ID ${connectorId} не найден.`);
+        logger.error(`Коннектор с ID ${connectorId} не найден.`);
         return { status: 'Rejected' };
       }
-
-      if (dev[connectorKey].status !== 'Available' || dev[connectorKey].availability !== 'Operative') {
-        logger.error(`Разъем ${connectorId} недоступен для зарядки.`);
+  
+      const connectorKey = `${config.stationName}_connector${connectorId}`;
+      if (dev[connectorKey]?.status !== 'Available') {
+        logger.error(`Коннектор ${connectorId} недоступен для зарядки. Текущий статус: ${dev[connectorKey]?.status}`);
         return { status: 'Rejected' };
       }
-
-      // Передаем client первым аргументом
+  
+      // Запускаем транзакцию
+      logger.info(`Попытка запуска зарядки на коннекторе ${connectorId}...`);
       await startTransaction(client, connectorId, idTag);
-
+  
+      logger.info(`Зарядка успешно начата на коннекторе ${connectorId}.`);
       return { status: 'Accepted' };
     } catch (error) {
-      logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
+      logger.error(`Ошибка в RemoteStartTransaction: ${error.message}`);
       return { status: 'Rejected' };
     }
   });
