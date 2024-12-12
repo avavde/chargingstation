@@ -1,8 +1,8 @@
-const { modbusClient, readWithTimeout, initializeModbusClient } = require('../clients/modbusClient');
+const { modbusClient, readWithTimeout, initializeModbusClient, getMeterReading } = require('../clients/modbusClient');
 const config = require('../config');
 const dev = require('../dev');
 const logger = require('./logger');
-const { sendStatusNotification } = require('./ocppUtils');
+const { sendStatusNotification, sendMeterValues } = require('./ocppUtils');
 
 async function pollConnectorData(client, connector) {
   const connectorKey = `${config.stationName}_connector${connector.id}`;
@@ -12,8 +12,7 @@ async function pollConnectorData(client, connector) {
 
     // Чтение энергии
     const startEnergy = Date.now();
-    const energyData = await readWithTimeout(connector.meterRegister, 2, 1000);
-    const energy = energyData.buffer.readFloatBE(0);
+    const energy = await getMeterReading(connector.id); // Используем функцию getMeterReading
     const durationEnergy = Date.now() - startEnergy;
 
     logger.debug(`Энергия: ${energy} kWh (Время: ${durationEnergy} мс)`);
@@ -30,6 +29,11 @@ async function pollConnectorData(client, connector) {
     dev[connectorKey].Kwt = energy;
     dev[connectorKey].Current = current;
 
+    // Отправка MeterValues, если транзакция активна
+    if (dev[connectorKey].transactionId) {
+      await sendMeterValues(client, connector.id);
+    }
+
     if (dev[connectorKey].status === 'Unavailable') {
       dev[connectorKey].status = 'Available';
       await sendStatusNotification(client, connector.id, 'Available', 'NoError');
@@ -39,7 +43,6 @@ async function pollConnectorData(client, connector) {
     dev[connectorKey].status = 'Unavailable';
     await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
 
-    // Если ошибка критична, пробуем переинициализировать Modbus-клиент
     if (!modbusClient.isOpen) {
       logger.warn('Modbus клиент не подключен. Переинициализация...');
       await initializeModbusClient();
