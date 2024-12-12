@@ -80,18 +80,16 @@ function setupOCPPHandlers(client) {
   });
 
   client.handle('RemoteStartTransaction', async (payload) => {
-    // Логирование исходного payload
+    // Полное логирование исходного payload
     logger.info(`Получен полный payload RemoteStartTransaction: ${JSON.stringify(payload, null, 2)}`);
   
     try {
-      // Полное логирование для диагностики
-      logger.debug(`Тип полученного payload: ${typeof payload}`);
-      logger.debug(`Ключи payload: ${Object.keys(payload)}`);
+      // Проверяем наличие params и корректно извлекаем поля
+      const params = payload?.params || payload;
+      const idTag = params?.idTag;
+      const connectorId = params?.connectorId;
   
-      // Извлечение данных из payload
-      const idTag = payload?.idTag;
-      const connectorId = payload?.connectorId;
-  
+      // Логирование извлеченных данных
       logger.info(`Извлеченные параметры: idTag=${idTag}, connectorId=${connectorId}`);
   
       // Проверка наличия idTag
@@ -100,7 +98,7 @@ function setupOCPPHandlers(client) {
         return { status: 'Rejected' };
       }
   
-      // Обработка connectorId: по умолчанию 1, если не передан или некорректен
+      // Установка значения connectorId по умолчанию
       const connectorIdToUse = Number(connectorId) || 1;
       logger.info(`Запуск транзакции для коннектора: ${connectorIdToUse} с idTag: ${idTag}`);
   
@@ -121,7 +119,7 @@ function setupOCPPHandlers(client) {
       logger.info('StartTransaction успешно отправлен.');
       return { status: 'Accepted' };
     } catch (error) {
-      // Полное логирование ошибок
+      // Логирование ошибки с полной трассировкой
       logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
       logger.debug(`Stack Trace: ${error.stack}`);
       return { status: 'Rejected' };
