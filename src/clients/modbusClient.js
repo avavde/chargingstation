@@ -49,44 +49,22 @@ async function pollModbusData(client) {
   setInterval(async () => {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
-      errorCounters[connectorKey] = errorCounters[connectorKey] || { count: 0, disabledUntil: 0 };
-
-      const now = Date.now();
-      if (now < errorCounters[connectorKey].disabledUntil) {
-        console.log(`Опрос для коннектора ${connector.id} временно отключен.`);
-        continue; // Пропускаем коннектор на время отключения
-      }
-
       try {
-        console.log(`Опрос Modbus для коннектора ${connector.id}...`);
-        const energy = await readWithTimeout(connector.meterRegister, 2, 1000);
-        const current = await readWithTimeout(connector.currentRegister, 2, 1000);
+        console.log(`Настройка Modbus ID: ${connector.meterAddress}`);
+        modbusClient.setID(connector.meterAddress);
 
-        dev[connectorKey].Kwt = energy;
-        dev[connectorKey].Current = current;
+        console.log(`Чтение данных с регистра ${connector.meterRegister}...`);
+        const energyData = await readWithTimeout(connector.meterRegister, 2, 2000);
+        console.log(`Полученные данные: ${JSON.stringify(energyData.data)}`);
 
-        if (dev[connectorKey].status === 'Unavailable') {
-          dev[connectorKey].status = 'Available';
-          await sendStatusNotification(client, connector.id, 'Available', 'NoError');
-        }
+        // Обновляем состояние коннектора
+        dev[connectorKey].Kwt = energyData.data[0]; // пример
 
-        errorCounters[connectorKey].count = 0; // Сбрасываем счетчик ошибок
       } catch (error) {
-        errorCounters[connectorKey].count += 1;
         logger.error(`Ошибка Modbus для коннектора ${connector.id}: ${error.message}`);
-
-        if (errorCounters[connectorKey].count >= 3) {
-          logger.warn(`Коннектор ${connector.id} отключен на 30 секунд из-за повторных ошибок.`);
-          errorCounters[connectorKey].disabledUntil = now + 30000; // Отключаем на 30 секунд
-        }
-
-        if (dev[connectorKey].status !== 'Unavailable') {
-          dev[connectorKey].status = 'Unavailable';
-          await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
-        }
       }
     }
-  }, config.modbusPollInterval || 5000);
+  }, 5000); // Интервал 5 секунд
 }
 
 module.exports = {
