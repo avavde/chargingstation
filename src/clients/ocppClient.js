@@ -71,13 +71,21 @@ async function initializeOCPPClient() {
 
       // Полное логирование входящих и исходящих сообщений
       client.on('message', (message) => {
-        logger.info(`Входящее сообщение: ${message}`);
+        try {
+          logger.info(`Входящее сообщение: ${JSON.stringify(message, null, 2)}`);
+        } catch (error) {
+          logger.error(`Ошибка при логировании входящего сообщения: ${error.message}`);
+        }
       });
-
+      
       client.on('request', (request) => {
-        logger.info(`Входящий запрос OCPP: ${JSON.stringify(request)}`);
+        try {
+          logger.info(`Входящий запрос OCPP: ${JSON.stringify(request, null, 2)}`);
+        } catch (error) {
+          logger.error(`Ошибка при логировании входящего запроса: ${error.message}`);
+        }
       });
-
+      
       client.on('response', (response) => {
         logger.info(`Исходящий ответ OCPP: ${JSON.stringify(response)}`);
       });
