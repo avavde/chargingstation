@@ -178,27 +178,61 @@ function setupOCPPHandlers(client) {
   });
 
   // Обработчик ChangeConfiguration
+  
   client.handle('ChangeConfiguration', async (payload) => {
     logger.info(`ChangeConfiguration получен: ${JSON.stringify(payload)}`);
-
+  
     const { key, value } = payload;
     let status = 'Accepted';
-
-    const allowedKeys = ['AllowOfflineTxForUnknownId', 'AuthorizationCacheEnabled', 'pricePerKwh'];
+  
+    // Список поддерживаемых и доступных для изменения ключей
+    const allowedKeys = ['AllowOfflineTxForUnknownId', 'AuthorizationCacheEnabled', 'pricePerKwh', 'connectors'];
     const readOnlyKeys = ['stationName', 'vendor'];
-
-    if (!allowedKeys.includes(key)) {
+  
+    try {
+      // Проверка на ключи только для чтения
+      if (readOnlyKeys.includes(key)) {
+        status = 'Rejected';
+        logger.error(`Ключ ${key} является только для чтения.`);
+      }
+      // Проверка на допустимые ключи
+      else if (!allowedKeys.includes(key)) {
+        status = 'Rejected';
+        logger.error(`Ключ ${key} не поддерживается для изменения.`);
+      }
+      // Обработка специального ключа 'connectors'
+      else if (key === 'connectors') {
+        try {
+          const parsedValue = JSON.parse(value); // Парсим JSON-строку
+          if (Array.isArray(parsedValue)) {
+            config[key] = parsedValue; // Обновляем конфигурацию
+            fs.writeFileSync(
+              path.join(__dirname, '../../config/ocpp_config.json'),
+              JSON.stringify(config, null, 2)
+            );
+            logger.info(`Ключ ${key} успешно обновлен: ${JSON.stringify(parsedValue)}`);
+          } else {
+            throw new Error('Значение ключа connectors должно быть массивом.');
+          }
+        } catch (error) {
+          logger.error(`Ошибка при обработке ключа connectors: ${error.message}`);
+          status = 'Rejected';
+        }
+      }
+      // Обработка остальных допустимых ключей
+      else {
+        config[key] = value; // Обновляем конфигурацию
+        fs.writeFileSync(
+          path.join(__dirname, '../../config/ocpp_config.json'),
+          JSON.stringify(config, null, 2)
+        );
+        logger.info(`Параметр ${key} изменен на ${value}.`);
+      }
+    } catch (error) {
+      logger.error(`Ошибка в обработчике ChangeConfiguration: ${error.message}`);
       status = 'Rejected';
-      logger.error(`Ключ ${key} не поддерживается для изменения.`);
-    } else if (readOnlyKeys.includes(key)) {
-      status = 'Rejected';
-      logger.error(`Ключ ${key} является только для чтения.`);
-    } else {
-      config[key] = value;
-      fs.writeFileSync(path.join(__dirname, '../../config/ocpp_config.json'), JSON.stringify(config, null, 2));
-      logger.info(`Параметр ${key} изменен на ${value}.`);
     }
-
+  
     return { status };
   });
 
