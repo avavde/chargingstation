@@ -1,8 +1,8 @@
-// src/utils/ocppUtils.js
-
 const logger = require('./logger');
 const dev = require('../dev');
 const config = require('../config');
+const { readWithTimeout } = require('../clients/modbusClient'); // Импортируем необходимые функции
+const { modbusClient } = require('../clients/modbusClient'); // Импортируем modbusClient, если требуется
 
 async function sendBootNotification(client, modemInfo) {
   if (!client) {
@@ -120,10 +120,12 @@ async function sendMeterValues(client, connectorId) {
       return;
     }
 
-    // Читаем показания счетчика с использованием Modbus
-    const meterValue = await modbusClient.readRegister(connectorId, config.meterRegister);
+    // Читаем показания счётчика с использованием Modbus
+    const meterValueData = await readWithTimeout(config.meterRegister, 2, 2000); // Используем правильный метод
+    const meterReading = meterValueData.data[0]; // Предполагаем, что первый регистр содержит kWh
+
     logger.info(
-      `Отправка MeterValues: connectorId=${connectorId}, transactionId=${transactionData.transactionId}, meterValue=${meterValue}`
+      `Отправка MeterValues: connectorId=${connectorId}, transactionId=${transactionData.transactionId}, meterValue=${meterReading}`
     );
 
     // Формируем payload с transactionId
@@ -133,18 +135,18 @@ async function sendMeterValues(client, connectorId) {
       meterValue: [
         {
           timestamp: new Date().toISOString(),
-          sampledValue: [{ value: meterValue.toString() }],
+          sampledValue: [{ value: meterReading.toString() }],
         },
       ],
     };
 
     // Отправка сообщения MeterValues
     await client.call('MeterValues', payload);
+    logger.info(`MeterValues отправлены для connectorId=${connectorId}`);
   } catch (error) {
     logger.error(`Ошибка при отправке MeterValues: ${error.message}`);
   }
 }
-
 
 async function sendInitialStatusNotifications(client) {
   if (!client) {
