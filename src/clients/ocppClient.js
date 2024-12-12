@@ -22,106 +22,77 @@ const { checkReservations, reservations } = require('../utils/reservationManager
 const { setupOCPPHandlers } = require('../handlers/ocppHandlers');
 
 let client;
-
 async function initializeOCPPClient() {
   return new Promise((resolve, reject) => {
     try {
+      logger.info('Создаем OCPP-клиент...');
+
       client = new RPCClient({
         endpoint: config.centralSystemUrl,
         identity: config.stationName,
         protocols: ['ocpp1.6'],
       });
 
-      logger.info(
-        `OCPP-клиент создан с настройками: ${JSON.stringify(
-          {
-            endpoint: config.centralSystemUrl,
-            identity: config.stationName,
-            protocols: ['ocpp1.6'],
-          },
-          null,
-          2
-        )}`
-      );
+      logger.info(`OCPP-клиент инициализирован с endpoint: ${config.centralSystemUrl}`);
 
-      // Подписываемся на события клиента
+      // Логирование событий подключения
       client.on('open', async () => {
-        logger.info('Соединение с центральной системой установлено.');
+        logger.info('WebSocket-соединение с центральной системой установлено.');
         try {
-          // Получение информации о модеме
           const modemInfo = await getModemInfo();
           logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
 
-          // Отправляем BootNotification
           await sendBootNotification(client, modemInfo);
+          logger.info('BootNotification успешно отправлен.');
 
-          // Отправляем начальные StatusNotification
           await sendInitialStatusNotifications(client);
+          logger.info('StatusNotification успешно отправлены.');
 
           // Запуск Heartbeat
-          setInterval(() => sendHeartbeat(client), 60000);
+          setInterval(() => {
+            logger.info('Отправка Heartbeat...');
+            sendHeartbeat(client);
+          }, 60000);
 
-          // Запуск обновления данных Modbus
-          updateModbusData(client);
-
-          // Запуск проверки бронирований
-          setInterval(() => checkReservations(client), 60000);
-
-          // Успешное подключение
           resolve();
         } catch (error) {
-          logger.error(`Ошибка при обработке события 'open': ${error.message}`);
+          logger.error(`Ошибка при инициализации OCPP-клиента: ${error.message}`);
           reject(error);
         }
-      });
-
-      client.on('close', () => {
-        logger.warn('Соединение с центральной системой закрыто.');
-        // Можно реализовать логику повторного подключения, если нужно
       });
 
       client.on('error', (error) => {
-        logger.error(`Ошибка OCPP-клиента: ${error.message}`);
-        // Если ошибка произошла до 'open', это означает проблемы с подключением
-        // Если 'open' еще не вызывался, вызываем reject(error)
-        if (!client.isOpen) {
-          reject(error);
-        }
-        // Если ошибка произошла после 'open', промис уже зарезолвен, просто логируем.
+        logger.error(`WebSocket ошибка: ${error.message}`);
       });
 
-      // Логирование всех входящих и исходящих сообщений
+      client.on('close', () => {
+        logger.warn('WebSocket-соединение закрыто.');
+      });
+
+      // Полное логирование входящих и исходящих сообщений
+      client.on('message', (message) => {
+        logger.info(`Входящее сообщение: ${message}`);
+      });
+
       client.on('request', (request) => {
-        logger.info(`Входящий OCPP-запрос: ${JSON.stringify(request)}`);
+        logger.info(`Входящий запрос OCPP: ${JSON.stringify(request)}`);
       });
 
       client.on('response', (response) => {
-        logger.debug(`[RESPONSE]: ${JSON.stringify(response, null, 2)}`);
+        logger.info(`Исходящий ответ OCPP: ${JSON.stringify(response)}`);
       });
 
       client.on('call', (call) => {
-        logger.debug(`[CALL]: ${JSON.stringify(call, null, 2)}`);
+        logger.info(`Исходящий вызов: ${JSON.stringify(call)}`);
       });
 
-      client.on('result', (result) => {
-        logger.debug(`[RESULT]: ${JSON.stringify(result, null, 2)}`);
-      });
-
-      client.on('message', (message) => {
-        logger.debug(`[MESSAGE]: ${message}`);
-      });
-
-      // Регистрация обработчиков сообщений
-      setupOCPPHandlers(client);
-
-      // Подключение к центральной системе
-      logger.info('Попытка подключения к OCPP-серверу...');
+      logger.info('Подключаемся к OCPP-серверу...');
       client.connect().catch((error) => {
-        logger.error(`Ошибка подключения OCPP-клиента: ${error.message}`);
+        logger.error(`Ошибка подключения к OCPP-серверу: ${error.message}`);
         reject(error);
       });
     } catch (error) {
-      logger.error(`Ошибка создания OCPP-клиента: ${error.message}`);
+      logger.error(`Ошибка при создании OCPP-клиента: ${error.message}`);
       reject(error);
     }
   });
