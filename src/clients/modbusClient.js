@@ -8,10 +8,21 @@ const modbusClient = new ModbusRTU();
 
 // Таймаут для чтения регистров
 async function readWithTimeout(register, length = 2, timeout = 1000) {
-  return Promise.race([
-    modbusClient.readHoldingRegisters(register, length),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Modbus таймаут')), timeout)),
-  ]);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('Modbus таймаут'));
+    }, timeout);
+
+    modbusClient.readHoldingRegisters(register, length)
+      .then((data) => {
+        clearTimeout(timer);
+        resolve(data);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 // Инициализация Modbus клиента
