@@ -1,4 +1,6 @@
 {
-  "listVersion": 0,
-  "idTagList": []
+  "listVersion": 1,
+  "idTagList": [
+    { "idTag": "11", "idTagInfo": { "status": "Accepted" } }
+  ]
 }
