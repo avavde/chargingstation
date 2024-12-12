@@ -109,13 +109,12 @@ function setupOCPPHandlers(client) {
       await startTransaction(client, connectorId, idTag);
   
       logger.info(`Транзакция успешно начата на коннекторе ${connectorId}.`);
-      return { status: 'Accepted' };
+      return { status: 'Accepted' }; // ОТПРАВЛЯЕМ ОТВЕТ УСПЕХА
     } catch (error) {
       logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
-      return { status: 'Rejected' };
+      return { status: 'Rejected' }; // ОТПРАВЛЯЕМ ОТВЕТ ОТКАЗА
     }
   });
-
   
   // Обработчик RemoteStopTransaction
   client.handle('RemoteStopTransaction', async (payload) => {
