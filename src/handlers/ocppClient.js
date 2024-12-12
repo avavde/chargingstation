@@ -91,7 +91,7 @@ async function initializeOCPPClient() {
       });
 
       // Логирование всех входящих и исходящих сообщений
-      client.on('request', (request) => {
+      await sendStatusNotification(client, connectorId, => {
         logger.info(`Входящий OCPP-запрос: ${JSON.stringify(request)}`);
       });
 
