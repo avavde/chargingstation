@@ -1,6 +1,7 @@
+// src/clients/modbusClient.js
+
 const ModbusRTU = require('modbus-serial');
 const logger = require('../utils/logger');
-const { sendStatusNotification } = require('../utils/ocppUtils');
 const config = require('../config');
 const dev = require('../dev');
 
@@ -26,6 +27,7 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
     }, 100);
   });
 }
+
 // Инициализация Modbus клиента
 async function initializeModbusClient() {
   try {
@@ -51,12 +53,12 @@ async function pollModbusData(client) {
     for (const connector of config.connectors) {
       const connectorKey = `${config.stationName}_connector${connector.id}`;
       try {
-        console.log(`Настройка Modbus ID: ${connector.meterAddress}`);
+        logger.debug(`Настройка Modbus ID: ${connector.meterAddress}`);
         modbusClient.setID(connector.meterAddress);
 
-        console.log(`Чтение данных с регистра ${connector.meterRegister}...`);
+        logger.debug(`Чтение данных с регистра ${connector.meterRegister}...`);
         const energyData = await readWithTimeout(connector.meterRegister, 2, 2000);
-        console.log(`Полученные данные: ${JSON.stringify(energyData.data)}`);
+        logger.debug(`Полученные данные: ${JSON.stringify(energyData.data)}`);
 
         // Обновляем состояние коннектора
         dev[connectorKey].Kwt = energyData.data[0]; // пример
@@ -68,9 +70,29 @@ async function pollModbusData(client) {
   }, 5000); // Интервал 5 секунд
 }
 
+// Функция для получения текущего показания счётчика
+async function getMeterReading(connectorId) {
+  const connector = config.connectors.find(c => c.id === connectorId);
+  if (!connector) {
+    throw new Error(`Коннектор с ID ${connectorId} не найден в конфигурации.`);
+  }
+
+  try {
+    modbusClient.setID(connector.meterAddress);
+    const data = await readWithTimeout(connector.meterRegister, 2, 2000);
+    const meterReading = data.data[0]; // Предполагается, что это kWh
+    logger.info(`Текущие показания счётчика для коннектора ${connectorId}: ${meterReading} kWh`);
+    return meterReading;
+  } catch (error) {
+    logger.error(`Ошибка при считывании показаний счётчика для коннектора ${connectorId}: ${error.message}`);
+    throw error;
+  }
+}
+
 module.exports = {
   modbusClient,
   initializeModbusClient,
   pollModbusData,
   readWithTimeout, // Обязательно экспортируем readWithTimeout
+  getMeterReading, // Экспортируем getMeterReading
 };

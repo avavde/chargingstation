@@ -1,3 +1,5 @@
+// src/handlers/ocppHandlers.js
+
 const { startTransaction, stopTransaction } = require('../utils/transactionManager');
 const {
   sendFirmwareStatusNotification,
@@ -30,7 +32,7 @@ if (!fs.existsSync(localAuthListPath)) {
 let localAuthList = JSON.parse(fs.readFileSync(localAuthListPath, 'utf-8'));
 
 function setupOCPPHandlers(client) {
-  // Authorize
+  // Обработчик Authorize
   client.handle('Authorize', async (payload) => {
     logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
     const { idTag } = payload;
@@ -46,7 +48,7 @@ function setupOCPPHandlers(client) {
     }
   });
 
-  // StartTransaction (инициирован ЦС)
+  // Обработчик StartTransaction (инициирован ЦС)
   client.handle('StartTransaction', async (payload) => {
     logger.info(`StartTransaction получен: ${JSON.stringify(payload)}`);
   
@@ -73,7 +75,7 @@ function setupOCPPHandlers(client) {
     return { transactionId, idTagInfo: { status: 'Accepted' } };
   });
 
-  // StopTransaction (инициирован ЦС)
+  // Обработчик StopTransaction (инициирован ЦС)
   client.handle('StopTransaction', async (payload) => {
     logger.info(`StopTransaction получен: ${JSON.stringify(payload)}`);
   
@@ -117,94 +119,89 @@ function setupOCPPHandlers(client) {
 
     return { status: 'Accepted', data: 'Data processed' };
   });
+// Обработчик RemoteStartTransaction (инициирован ЦС)
+client.handle('RemoteStartTransaction', async (payload) => {
+  logger.info(`Получен полный payload RemoteStartTransaction: ${JSON.stringify(payload, null, 2)}`);
 
-  // RemoteStartTransaction (инициирован ЦС)
-  client.handle('RemoteStartTransaction', async (payload) => {
-    logger.info(`Получен полный payload RemoteStartTransaction: ${JSON.stringify(payload, null, 2)}`);
-  
-    try {
-      const { idTag, connectorId } = payload?.params || payload;
-  
-      if (!idTag) {
-        logger.error('idTag отсутствует в запросе RemoteStartTransaction.');
-        return { status: 'Rejected' };
-      }
-  
-      const connectorIdToUse = connectorId || 1;
-  
-      logger.info(`Инициируем StartTransaction для connectorId=${connectorIdToUse} с idTag=${idTag}`);
-      const response = await startTransaction(client, connectorIdToUse, idTag);
-  
-      if (response && response.transactionId && response.idTagInfo && response.idTagInfo.status === 'Accepted') {
-        // Сохраняем transactionId
-        dev[`connector_${connectorIdToUse}`] = dev[`connector_${connectorIdToUse}`] || {};
-        dev[`connector_${connectorIdToUse}`].transactionId = response.transactionId;
-        dev[`connector_${connectorIdToUse}`].idTag = idTag;
-        dev[`connector_${connectorIdToUse}`].active = true;
+  try {
+    const { idTag, connectorId } = payload?.params || payload;
 
-        logger.info(`StartTransaction успешно завершен: transactionId=${response.transactionId}`);
-        return { status: 'Accepted' };
-      } else {
-        logger.error('StartTransaction завершился без transactionId или статус не Accepted.');
-        return { status: 'Rejected' };
-      }
-    } catch (error) {
-      logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
+    if (!idTag) {
+      logger.error('idTag отсутствует в запросе RemoteStartTransaction.');
       return { status: 'Rejected' };
     }
-  });
-  
-  // RemoteStopTransaction (инициирован ЦС)
-  client.handle('RemoteStopTransaction', async (payload) => {
-    logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload, null, 2)}`);
-  
-    try {
-      const { transactionId } = payload;
-  
-      if (!transactionId) {
-        logger.error('RemoteStopTransaction: отсутствует transactionId.');
-        return { status: 'Rejected' };
-      }
-  
-      const connectorEntry = Object.entries(dev).find(
-        ([, value]) => value.transactionId === transactionId && value.active
-      );
-  
-      if (!connectorEntry) {
-        logger.error(`RemoteStopTransaction: Транзакция с ID ${transactionId} не найдена.`);
-        return { status: 'Rejected' };
-      }
-  
-      const [connectorKey, transactionData] = connectorEntry;
-      const connectorId = parseInt(connectorKey.split('_')[1]);
-  
-      clearInterval(transactionData.meterInterval);
-      transactionData.active = false;
-  
-      logger.info(`RemoteStopTransaction: Завершаем транзакцию для connectorId=${connectorId}, transactionId=${transactionId}`);
-  
-      // Считываем текущие показания для StopTransaction
-      const currentMeterValue = await modbusClient.getMeterReading(); 
-      const stopTransactionPayload = {
-        transactionId,
-        meterStop: Math.round(currentMeterValue * 1000),
-        timestamp: new Date().toISOString(),
-      };
-  
-      await client.call('StopTransaction', stopTransactionPayload);
-  
-      logger.info(`RemoteStopTransaction успешно завершена для transactionId=${transactionId}`);
+
+    const connectorIdToUse = connectorId || 1;
+
+    logger.info(`Инициируем StartTransaction для connectorId=${connectorIdToUse} с idTag=${idTag}`);
+    const response = await startTransaction(client, connectorIdToUse, idTag);
+
+    if (response && response.transactionId && response.idTagInfo && response.idTagInfo.status === 'Accepted') {
+      // Транзакция уже сохранена внутри startTransaction
+      logger.info(`StartTransaction успешно завершен: transactionId=${response.transactionId}`);
       return { status: 'Accepted' };
-    } catch (error) {
-      logger.error(`Ошибка в обработчике RemoteStopTransaction: ${error.message}`);
-      logger.debug(`Stack Trace: ${error.stack}`);
+    } else {
+      logger.error('StartTransaction завершился без transactionId или статус не Accepted.');
       return { status: 'Rejected' };
     }
-  });
+  } catch (error) {
+    logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
+    return { status: 'Rejected' };
+  }
+});
 
-  
 
-  
+  // Обработчик RemoteStopTransaction (инициирован ЦС)
+ // Обработчик RemoteStopTransaction (инициирован ЦС)
+client.handle('RemoteStopTransaction', async (payload) => {
+  logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload, null, 2)}`);
+
+  try {
+    const { transactionId } = payload;
+
+    if (!transactionId) {
+      logger.error('RemoteStopTransaction: отсутствует transactionId.');
+      return { status: 'Rejected' };
+    }
+
+    const connectorEntry = Object.entries(dev).find(
+      ([, value]) => value.transactionId === transactionId && value.active
+    );
+
+    if (!connectorEntry) {
+      logger.error(`RemoteStopTransaction: Транзакция с ID ${transactionId} не найдена.`);
+      return { status: 'Rejected' };
+    }
+
+    const [connectorKey, transactionData] = connectorEntry;
+    const connectorId = parseInt(connectorKey.split('_')[1]);
+
+    clearInterval(transactionData.meterInterval);
+    transactionData.active = false;
+
+    logger.info(`RemoteStopTransaction: Завершаем транзакцию для connectorId=${connectorId}, transactionId=${transactionId}`);
+
+    // Считываем текущие показания для StopTransaction
+    const currentMeterValue = await modbusClient.getMeterReading(connectorId);
+    const stopTransactionPayload = {
+      transactionId,
+      meterStop: Math.round(currentMeterValue * 1000),
+      timestamp: new Date().toISOString(),
+    };
+
+    await client.call('StopTransaction', stopTransactionPayload);
+
+    logger.info(`RemoteStopTransaction успешно завершена для transactionId=${transactionId}`);
+    return { status: 'Accepted' };
+  } catch (error) {
+    logger.error(`Ошибка в обработчике RemoteStopTransaction: ${error.message}`);
+    logger.debug(`Stack Trace: ${error.stack}`);
+    return { status: 'Rejected' };
+  }
+});
+
+
+ 
   client.handle('ChangeAvailability', async (payload) => {
     logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
 

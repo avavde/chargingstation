@@ -1,205 +1,182 @@
-const { RPCClient } = require('ocpp-rpc');
-const logger = require('../utils/logger');
+// src/utils/ocppUtils.js
+
+const logger = require('./logger');
+const dev = require('../dev');
 const config = require('../config');
-const { getModemInfo } = require('../clients/modemClient');
-const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = require('../utils/ocppUtils');
+const { readWithTimeout, initializeModbusClient } = require('../clients/modbusClient'); // Импортируем необходимые функции
 
-let client;
+async function sendBootNotification(client, modemInfo) {
+  if (!client) {
+    logger.warn('Попытка отправить BootNotification без инициализированного клиента.');
+    return;
+  }
 
-/**
- * Инициализация OCPP-клиента и подключение к центральной системе.
- * После установления соединения отправляет BootNotification, начальные StatusNotification
- * и запускает периодическую отправку Heartbeat.
- */
-async function initializeOCPPClient() {
-  return new Promise((resolve, reject) => {
-    try {
-      logger.info('Создаем OCPP-клиент...');
+  try {
+    const payload = {
+      chargePointVendor: config.vendor,
+      chargePointModel: config.model,
+      chargePointSerialNumber: config.stationName,
+      firmwareVersion: '1.0',
+      meterSerialNumber: 'Unknown', // При необходимости обновите это значение
+    };
 
-      client = new RPCClient({
-        endpoint: config.centralSystemUrl,
-        identity: config.stationName,
-        protocols: ['ocpp1.6']
-      });
-
-      logger.info(`OCPP-клиент инициализирован с endpoint: ${config.centralSystemUrl}`);
-
-      // Обработчик открытия WebSocket-соединения
-      client.on('open', async () => {
-        logger.info('WebSocket-соединение с центральной системой установлено.');
-        try {
-          const modemInfo = await getModemInfo();
-          logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
-
-          await sendBootNotification(client, modemInfo);
-          logger.info('BootNotification успешно отправлен.');
-
-          await sendInitialStatusNotifications(client);
-          logger.info('StatusNotification успешно отправлены.');
-
-          // Периодическая отправка Heartbeat
-          setInterval(() => {
-            logger.info('Отправка Heartbeat...');
-            sendHeartbeat(client);
-          }, 60000);
-
-          resolve();
-        } catch (error) {
-          logger.error(`Ошибка при инициализации OCPP-клиента: ${error.message}`);
-          reject(error);
-        }
-      });
-
-      // Обработчик ошибок WebSocket
-      client.on('error', (error) => {
-        logger.error(`WebSocket ошибка: ${error.message}`);
-      });
-
-      // Обработчик закрытия WebSocket
-      client.on('close', () => {
-        logger.warn('WebSocket-соединение закрыто.');
-      });
-
-      // Обработчик всех входящих/исходящих сообщений (сырые данные - строка)
-      client.on('message', (rawMsg) => {
-        // rawMsg: { message: '["..."]', outbound: boolean }
-        logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(rawMsg, null, 2)}`);
-        try {
-          const rawMessageStr = rawMsg.message;
-          if (typeof rawMessageStr !== 'string') {
-            throw new Error('Отсутствует корректная строка для парсинга.');
-          }
-
-          const parsedMessage = JSON.parse(rawMessageStr);
-          if (!Array.isArray(parsedMessage)) {
-            throw new Error('Входящее сообщение имеет неверный формат. Ожидался массив.');
-          }
-
-          const [messageType, messageId, ...rest] = parsedMessage;
-
-          if (messageType === 2) {
-            // OCPP Call (Request)
-            const [action, payload = {}] = rest;
-            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
-              type: 'Request',
-              messageId,
-              method: action,
-              payload
-            }, null, 2)}`);
-          } else if (messageType === 3) {
-            // OCPP CallResult (Response)
-            const [payload = {}] = rest;
-            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
-              type: 'Response',
-              messageId,
-              payload
-            }, null, 2)}`);
-          } else if (messageType === 4) {
-            // OCPP CallError
-            const [errorDetails] = rest;
-            logger.error(`Ошибка в сообщении OCPP: ${JSON.stringify({
-              type: 'Error',
-              messageId,
-              details: errorDetails
-            }, null, 2)}`);
-          } else {
-            throw new Error(`Неизвестный тип сообщения: ${messageType}`);
-          }
-        } catch (error) {
-          logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
-          logger.error(`Содержимое сообщения: ${JSON.stringify(rawMsg, null, 2)}`);
-        }
-      });
-
-      // Обработчик входящих запросов (уже распарсенные данные в payload)
-      client.on('request', (rawReq) => {
-        try {
-          // rawReq: { outbound: boolean, payload: [...] }
-          // payload - массив вида [2, messageId, action, payloadObj]
-          const { payload } = rawReq;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат запроса OCPP.');
-          }
-
-          const [messageType, messageId, method, reqPayload] = payload;
-
-          logger.info(`Входящий запрос OCPP:\n${JSON.stringify({
-            type: 'Request',
-            messageId: messageId || 'N/A',
-            method: method || 'Unknown',
-            payload: reqPayload || {}
-          }, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке входящего запроса: ${error.message}`);
-          logger.error(`Содержимое запроса: ${JSON.stringify(rawReq, null, 2)}`);
-        }
-      });
-
-      // Обработчик входящих ответов (уже распарсенные данные в payload)
-      client.on('response', (rawRes) => {
-        try {
-          // rawRes: { outbound: boolean, payload: [...] }
-          // payload - массив вида [3, messageId, payloadObj]
-          const { payload } = rawRes;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат ответа OCPP.');
-          }
-
-          const [messageType, messageId, resPayload] = payload;
-
-          logger.info(`Входящий ответ OCPP:\n${JSON.stringify({
-            type: 'Response',
-            messageId: messageId || 'N/A',
-            payload: resPayload || {}
-          }, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке ответа: ${error.message}`);
-          logger.error(`Содержимое ответа: ${JSON.stringify(rawRes, null, 2)}`);
-        }
-      });
-
-      // Обработчик исходящих вызовов (уже распарсенные данные в payload)
-      client.on('call', (rawCall) => {
-        try {
-          // rawCall: { outbound: boolean, payload: [...] }
-          // payload - массив вида [2, messageId, action, payloadObj] для запросов
-          // или [3, messageId, payloadObj] для ответов
-          const { payload } = rawCall;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат исходящего вызова OCPP.');
-          }
-
-          logger.info(`Исходящий вызов OCPP:\n${JSON.stringify(payload, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке исходящего вызова: ${error.message}`);
-          logger.error(`Содержимое вызова: ${JSON.stringify(rawCall, null, 2)}`);
-        }
-      });
-
-      logger.info('Подключаемся к OCPP-серверу...');
-      client.connect().catch((error) => {
-        logger.error(`Ошибка подключения к OCPP-серверу: ${error.message}`);
-        reject(error);
-      });
-    } catch (error) {
-      logger.error(`Ошибка при создании OCPP-клиента: ${error.message}`);
-      reject(error);
+    if (modemInfo) {
+      payload.iccid = modemInfo.iccid || 'Unknown';
+      payload.imsi = modemInfo.imsi || 'Unknown';
     }
-  });
+
+    const response = await client.call('BootNotification', payload);
+    logger.info(`BootNotification отправлен. Ответ: ${JSON.stringify(response, null, 2)}`);
+
+    if (response.status === 'Accepted') {
+      logger.info('BootNotification принят.');
+      // Установка интервала для Heartbeat на основе ответа, если требуется
+      const heartbeatInterval = response.interval || 60;
+      setInterval(() => sendHeartbeat(client), heartbeatInterval * 1000);
+    } else {
+      logger.error('BootNotification отклонен.');
+    }
+  } catch (error) {
+    logger.error(`Ошибка при отправке BootNotification: ${error.message}`);
+  }
 }
 
-/**
- * Возвращает экземпляр OCPP-клиента.
- * Если клиент еще не инициализирован, генерируется ошибка.
- */
-function getClient() {
+async function sendStatusNotification(client, connectorId, status, errorCode) {
   if (!client) {
-    throw new Error('OCPP-клиент еще не инициализирован.');
+    logger.warn(`Попытка отправить StatusNotification без клиента. Статус: ${status} для коннектора ${connectorId}`);
+    return;
   }
-  return client;
+
+  try {
+    const payload = {
+      connectorId,
+      status,
+      errorCode,
+      timestamp: new Date().toISOString(),
+    };
+
+    const response = await client.call('StatusNotification', payload);
+    logger.info(`StatusNotification отправлен для коннектора ${connectorId}. Ответ: ${JSON.stringify(response, null, 2)}`);
+  } catch (error) {
+    logger.error(`Ошибка при отправке StatusNotification для коннектора ${connectorId}: ${error.message}`);
+  }
+}
+
+async function sendHeartbeat(client) {
+  if (!client) {
+    logger.warn('Попытка отправить Heartbeat без клиента.');
+    return;
+  }
+
+  try {
+    const response = await client.call('Heartbeat', {});
+    logger.info('Heartbeat отправлен.');
+  } catch (error) {
+    logger.error(`Ошибка при отправке Heartbeat: ${error.message}`);
+  }
+}
+
+async function sendFirmwareStatusNotification(client, status) {
+  if (!client) {
+    logger.warn(`Попытка отправить FirmwareStatusNotification без клиента. Статус: ${status}`);
+    return;
+  }
+
+  try {
+    const payload = {
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    const response = await client.call('FirmwareStatusNotification', payload);
+    logger.info(`FirmwareStatusNotification отправлен со статусом ${status}. Ответ: ${JSON.stringify(response, null, 2)}`);
+  } catch (error) {
+    logger.error(`Ошибка отправки FirmwareStatusNotification: ${error.message}`);
+  }
+}
+
+async function sendDiagnosticsStatusNotification(client, status) {
+  if (!client) {
+    logger.warn(`Попытка отправить DiagnosticsStatusNotification без клиента. Статус: ${status}`);
+    return;
+  }
+
+  try {
+    const payload = {
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    const response = await client.call('DiagnosticsStatusNotification', payload);
+    logger.info(`DiagnosticsStatusNotification отправлен со статусом ${status}. Ответ: ${JSON.stringify(response, null, 2)}`);
+  } catch (error) {
+    logger.error(`Ошибка отправки DiagnosticsStatusNotification: ${error.message}`);
+  }
+}
+
+async function sendMeterValues(client, connectorId) {
+  try {
+    // Проверяем, активна ли транзакция для данного коннектора
+    const transactionData = dev[`connector_${connectorId}`];
+    if (!transactionData || !transactionData.transactionId || !transactionData.active) {
+      logger.warn(`Отправка MeterValues пропущена: Нет активной транзакции для connectorId=${connectorId}`);
+      return;
+    }
+
+    // Читаем показания счётчика с использованием Modbus
+    const meterValue = await readWithTimeout(config.meterRegister, 2, 2000); // Используем правильный метод
+    const meterReading = meterValue.data[0]; // Предполагаем, что первый регистр содержит kWh
+
+    logger.info(
+      `Отправка MeterValues: connectorId=${connectorId}, transactionId=${transactionData.transactionId}, meterValue=${meterReading}`
+    );
+
+    // Формируем payload с transactionId
+    const payload = {
+      connectorId,
+      transactionId: transactionData.transactionId,
+      meterValue: [
+        {
+          timestamp: new Date().toISOString(),
+          sampledValue: [{ value: meterReading.toString() }],
+        },
+      ],
+    };
+
+    // Отправка сообщения MeterValues
+    await client.call('MeterValues', payload);
+    logger.info(`MeterValues отправлены для connectorId=${connectorId}`);
+  } catch (error) {
+    logger.error(`Ошибка при отправке MeterValues: ${error.message}`);
+  }
+}
+
+async function sendInitialStatusNotifications(client) {
+  if (!client) {
+    logger.warn('Попытка отправить начальные StatusNotification без клиента.');
+    return;
+  }
+
+  try {
+    // Отправка StatusNotification для ConnectorId 0 (общий статус станции)
+    await sendStatusNotification(client, 0, 'Available', 'NoError');
+    // Отправка StatusNotification для каждого коннектора
+    for (const connector of config.connectors) {
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      const status = dev[connectorKey].status || 'Available';
+      await sendStatusNotification(client, connector.id, status, 'NoError');
+    }
+
+    logger.info('Начальные StatusNotification отправлены для всех коннекторов.');
+  } catch (error) {
+    logger.error(`Ошибка отправки начальных StatusNotification: ${error.message}`);
+  }
 }
 
 module.exports = {
-  initializeOCPPClient,
-  getClient,
+  sendBootNotification,
+  sendStatusNotification,
+  sendHeartbeat,
+  sendFirmwareStatusNotification,
+  sendDiagnosticsStatusNotification,
+  sendMeterValues,
+  sendInitialStatusNotifications,
 };

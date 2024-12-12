@@ -1,9 +1,11 @@
+// src/utils/transactionManager.js
+
 const { controlRelay } = require('./relayControl');
 const dev = require('../dev');
 const logger = require('./logger');
 const config = require('../config');
 const { sendStatusNotification } = require('./ocppUtils');
-const { getMeterReading } = require('../clients/modbusClient'); // Предполагается, что эта функция существует
+const { getMeterReading } = require('../clients/modbusClient'); // Убедитесь, что эта функция существует и работает
 
 async function startTransaction(client, connectorId, idTag) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
@@ -19,8 +21,8 @@ async function startTransaction(client, connectorId, idTag) {
     };
   }
 
-  // Считаем текущее показание счётчика в кВт·ч для начала транзакции
-  const currentMeterValue = await getMeterReading();
+  // Считываем текущее показание счётчика в кВт·ч для начала транзакции
+  const currentMeterValue = await getMeterReading(connectorId); // Передаём connectorId, если требуется
 
   dev[connectorKey].status = 'Preparing'; 
   dev[connectorKey].idTag = idTag;
@@ -74,7 +76,7 @@ async function stopTransaction(client, connectorId) {
   controlRelay(connector.relayPath, false); // Выключаем реле, прекращаем зарядку
 
   // Считываем текущее показание счётчика для завершения транзакции
-  const currentMeterValue = await getMeterReading();
+  const currentMeterValue = await getMeterReading(connectorId);
 
   // Отправка StopTransaction
   await client.call('StopTransaction', {
