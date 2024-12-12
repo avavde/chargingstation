@@ -1,5 +1,3 @@
-// src/handlers/ocppHandlers.js
-
 const { startTransaction, stopTransaction } = require('../utils/transactionManager');
 const {
   sendFirmwareStatusNotification,
@@ -32,7 +30,7 @@ if (!fs.existsSync(localAuthListPath)) {
 let localAuthList = JSON.parse(fs.readFileSync(localAuthListPath, 'utf-8'));
 
 function setupOCPPHandlers(client) {
-  // Обработчик Authorize
+  // Authorize
   client.handle('Authorize', async (payload) => {
     logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
     const { idTag } = payload;
@@ -48,42 +46,40 @@ function setupOCPPHandlers(client) {
     }
   });
 
-  // Обработчик StartTransaction
+  // StartTransaction (инициирован ЦС)
   client.handle('StartTransaction', async (payload) => {
     logger.info(`StartTransaction получен: ${JSON.stringify(payload)}`);
   
     const { connectorId, idTag, meterStart, timestamp } = payload;
   
-    // Генерация временного transactionId
+    // Генерируем случайный transactionId для демонстрации
     const transactionId = Math.floor(Math.random() * 1000000);
   
-    // Сохраняем данные транзакции в dev
+    // Сохраняем данные транзакции
     dev[`connector_${connectorId}`] = {
       transactionId,
       idTag,
       meterStart,
       timestamp,
       active: true,
+      meterInterval: setInterval(async () => {
+        // Каждые 60 секунд отправляем MeterValues, используя реальные показания счётчика
+        await sendMeterValues(client, connectorId);
+      }, 60000)
     };
   
     logger.info(`Транзакция начата: connectorId=${connectorId}, transactionId=${transactionId}`);
   
-    // Настройка отправки MeterValues каждые 60 секунд
-    dev[`connector_${connectorId}`].meterInterval = setInterval(async () => {
-      await sendMeterValues(client, connectorId);
-    }, 60000);
-  
     return { transactionId, idTagInfo: { status: 'Accepted' } };
   });
-  
 
-  // Обработчик StopTransaction
+  // StopTransaction (инициирован ЦС)
   client.handle('StopTransaction', async (payload) => {
     logger.info(`StopTransaction получен: ${JSON.stringify(payload)}`);
   
     const { transactionId, meterStop, timestamp } = payload;
   
-    // Поиск активной транзакции по transactionId
+    // Поиск активной транзакции
     const connectorEntry = Object.entries(dev).find(
       ([, value]) => value.transactionId === transactionId && value.active
     );
@@ -96,24 +92,19 @@ function setupOCPPHandlers(client) {
     const [connectorKey, transactionData] = connectorEntry;
     const connectorId = parseInt(connectorKey.split('_')[1]);
   
-    // Остановка отправки MeterValues
     clearInterval(transactionData.meterInterval);
-  
-    // Завершаем транзакцию
-    logger.info(`Завершение транзакции: connectorId=${connectorId}, transactionId=${transactionId}`);
     transactionData.active = false;
   
-    // Возвращаем результат
+    logger.info(`Завершение транзакции: connectorId=${connectorId}, transactionId=${transactionId}`);
+  
     return { idTagInfo: { status: 'Accepted' } };
   });
-  
 
-  // Обработчик DataTransfer
+  // DataTransfer
   client.handle('DataTransfer', async (payload) => {
     logger.info(`DataTransfer получен: ${JSON.stringify(payload)}`);
 
     const { vendorId, messageId, data } = payload;
-
     if (vendorId === 'YourVendorId') {
       if (messageId === 'UpdateSetting') {
         const { key, value } = data;
@@ -127,6 +118,7 @@ function setupOCPPHandlers(client) {
     return { status: 'Accepted', data: 'Data processed' };
   });
 
+  // RemoteStartTransaction (инициирован ЦС)
   client.handle('RemoteStartTransaction', async (payload) => {
     logger.info(`Получен полный payload RemoteStartTransaction: ${JSON.stringify(payload, null, 2)}`);
   
@@ -140,22 +132,20 @@ function setupOCPPHandlers(client) {
   
       const connectorIdToUse = connectorId || 1;
   
-      // Логика для старта транзакции
       logger.info(`Инициируем StartTransaction для connectorId=${connectorIdToUse} с idTag=${idTag}`);
       const response = await startTransaction(client, connectorIdToUse, idTag);
   
-      if (response && response.transactionId) {
+      if (response && response.transactionId && response.idTagInfo && response.idTagInfo.status === 'Accepted') {
         // Сохраняем transactionId
-        dev[`connector_${connectorIdToUse}`] = {
-          transactionId: response.transactionId,
-          idTag,
-          active: true,
-        };
-  
+        dev[`connector_${connectorIdToUse}`] = dev[`connector_${connectorIdToUse}`] || {};
+        dev[`connector_${connectorIdToUse}`].transactionId = response.transactionId;
+        dev[`connector_${connectorIdToUse}`].idTag = idTag;
+        dev[`connector_${connectorIdToUse}`].active = true;
+
         logger.info(`StartTransaction успешно завершен: transactionId=${response.transactionId}`);
         return { status: 'Accepted' };
       } else {
-        logger.error('StartTransaction завершился без transactionId.');
+        logger.error('StartTransaction завершился без transactionId или статус не Accepted.');
         return { status: 'Rejected' };
       }
     } catch (error) {
@@ -164,21 +154,18 @@ function setupOCPPHandlers(client) {
     }
   });
   
-  
-  // Обработчик RemoteStopTransaction
+  // RemoteStopTransaction (инициирован ЦС)
   client.handle('RemoteStopTransaction', async (payload) => {
     logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload, null, 2)}`);
   
     try {
       const { transactionId } = payload;
   
-      // Проверяем наличие transactionId
       if (!transactionId) {
         logger.error('RemoteStopTransaction: отсутствует transactionId.');
         return { status: 'Rejected' };
       }
   
-      // Ищем активную транзакцию по transactionId
       const connectorEntry = Object.entries(dev).find(
         ([, value]) => value.transactionId === transactionId && value.active
       );
@@ -191,17 +178,16 @@ function setupOCPPHandlers(client) {
       const [connectorKey, transactionData] = connectorEntry;
       const connectorId = parseInt(connectorKey.split('_')[1]);
   
-      // Остановка отправки MeterValues
       clearInterval(transactionData.meterInterval);
-  
-      // Завершаем транзакцию
-      logger.info(`RemoteStopTransaction: Завершаем транзакцию для connectorId=${connectorId}, transactionId=${transactionId}`);
       transactionData.active = false;
   
-      // Отправляем StopTransaction в ЦС
+      logger.info(`RemoteStopTransaction: Завершаем транзакцию для connectorId=${connectorId}, transactionId=${transactionId}`);
+  
+      // Считываем текущие показания для StopTransaction
+      const currentMeterValue = await modbusClient.getMeterReading(); 
       const stopTransactionPayload = {
         transactionId,
-        meterStop: transactionData.meterStart + 10, // пример для тестов
+        meterStop: Math.round(currentMeterValue * 1000),
         timestamp: new Date().toISOString(),
       };
   
@@ -215,10 +201,10 @@ function setupOCPPHandlers(client) {
       return { status: 'Rejected' };
     }
   });
-  
+
   
 
-  // Обработчик ChangeAvailability
+  
   client.handle('ChangeAvailability', async (payload) => {
     logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
 
@@ -255,35 +241,27 @@ function setupOCPPHandlers(client) {
     return { status };
   });
 
-  // Обработчик ChangeConfiguration
-
   client.handle('ChangeConfiguration', async (payload) => {
     logger.info(`ChangeConfiguration получен: ${JSON.stringify(payload)}`);
   
     const { key, value } = payload;
     let status = 'Accepted';
   
-    // Список поддерживаемых и допустимых для изменения ключей
     const allowedKeys = ['AllowOfflineTxForUnknownId', 'AuthorizationCacheEnabled', 'pricePerKwh', 'connectors'];
     const readOnlyKeys = ['stationName', 'vendor'];
   
     try {
-      // Проверка ключей только для чтения
       if (readOnlyKeys.includes(key)) {
         status = 'Rejected';
         logger.error(`Ключ ${key} является только для чтения.`);
-      }
-      // Проверка допустимых ключей
-      else if (!allowedKeys.includes(key)) {
+      } else if (!allowedKeys.includes(key)) {
         status = 'Rejected';
         logger.error(`Ключ ${key} не поддерживается для изменения.`);
-      }
-      // Обработка ключа connectors
-      else if (key === 'connectors') {
+      } else if (key === 'connectors') {
         try {
-          const parsedValue = JSON.parse(value); // Парсим JSON-строку
+          const parsedValue = JSON.parse(value);
           if (Array.isArray(parsedValue)) {
-            config.connectors = parsedValue; // Обновляем конфигурацию
+            config.connectors = parsedValue; 
             fs.writeFileSync(
               path.join(__dirname, '../../config/ocpp_config.json'),
               JSON.stringify(config, null, 2)
@@ -296,10 +274,8 @@ function setupOCPPHandlers(client) {
           logger.error(`Ошибка при обработке ключа connectors: ${error.message}`);
           status = 'Rejected';
         }
-      }
-      // Обработка остальных допустимых ключей
-      else {
-        config[key] = value; // Обновляем конфигурацию
+      } else {
+        config[key] = value;
         fs.writeFileSync(
           path.join(__dirname, '../../config/ocpp_config.json'),
           JSON.stringify(config, null, 2)
@@ -314,7 +290,6 @@ function setupOCPPHandlers(client) {
     return { status };
   });
 
-  // Обработчик GetConfiguration
   client.handle('GetConfiguration', async (payload) => {
     logger.info(`GetConfiguration получен: ${JSON.stringify(payload)}`);
 
@@ -327,7 +302,7 @@ function setupOCPPHandlers(client) {
         configurationKey.push({
           key: k,
           readonly: false,
-          value: k === 'connectors' ? JSON.stringify(v) : v.toString(), // Сериализация для connectors
+          value: k === 'connectors' ? JSON.stringify(v) : v.toString(),
         });
       }
     } else {
@@ -347,7 +322,6 @@ function setupOCPPHandlers(client) {
     return { configurationKey, unknownKey };
   });
 
-  // Обработчик ReserveNow
   client.handle('ReserveNow', async (payload) => {
     logger.info(`ReserveNow получен: ${JSON.stringify(payload)}`);
 
@@ -378,7 +352,6 @@ function setupOCPPHandlers(client) {
     return { status: 'Accepted' };
   });
 
-  // Обработчик CancelReservation
   client.handle('CancelReservation', async (payload) => {
     logger.info(`CancelReservation получен: ${JSON.stringify(payload)}`);
 
@@ -399,7 +372,6 @@ function setupOCPPHandlers(client) {
     }
   });
 
-  // Обработчик UpdateFirmware
   client.handle('UpdateFirmware', async (payload) => {
     logger.info(`UpdateFirmware получен: ${JSON.stringify(payload)}`);
 
@@ -460,7 +432,6 @@ function setupOCPPHandlers(client) {
     return {};
   });
 
-  // Обработчик GetDiagnostics
   client.handle('GetDiagnostics', async (payload) => {
     logger.info(`GetDiagnostics получен: ${JSON.stringify(payload)}`);
 
@@ -509,7 +480,6 @@ function setupOCPPHandlers(client) {
     return { fileName: path.basename(diagnosticsFilePath) };
   });
 
-  // Обработчик Reset
   client.handle('Reset', async (payload) => {
     logger.info(`Reset получен: ${JSON.stringify(payload)}`);
 
@@ -541,7 +511,6 @@ function setupOCPPHandlers(client) {
     return { status };
   });
 
-  // Обработчик UnlockConnector
   client.handle('UnlockConnector', async (payload) => {
     logger.info(`UnlockConnector получен: ${JSON.stringify(payload)}`);
 
@@ -558,7 +527,6 @@ function setupOCPPHandlers(client) {
     return { status: 'Unlocked' };
   });
 
-  // Обработчик ClearCache
   client.handle('ClearCache', async (payload) => {
     logger.info(`ClearCache получен: ${JSON.stringify(payload)}`);
 
@@ -570,7 +538,6 @@ function setupOCPPHandlers(client) {
     return { status: 'Accepted' };
   });
 
-  // Обработчик TriggerMessage
   client.handle('TriggerMessage', async (payload) => {
     logger.info(`TriggerMessage получен: ${JSON.stringify(payload)}`);
 
@@ -604,7 +571,6 @@ function setupOCPPHandlers(client) {
     return { status };
   });
 
-  // Обработчик SetChargingProfile
   client.handle('SetChargingProfile', async (payload) => {
     logger.info(`SetChargingProfile получен: ${JSON.stringify(payload)}`);
 
@@ -616,16 +582,12 @@ function setupOCPPHandlers(client) {
     return { status };
   });
 
-  // Обработчик GetCompositeSchedule
   client.handle('GetCompositeSchedule', async (payload) => {
     logger.info(`GetCompositeSchedule получен: ${JSON.stringify(payload)}`);
-
-    const { connectorId, duration, chargingRateUnit } = payload;
 
     return { status: 'Rejected' };
   });
 
-  // Обработчик SendLocalList
   client.handle('SendLocalList', async (payload) => {
     logger.info(`SendLocalList получен: ${JSON.stringify(payload)}`);
 
@@ -651,7 +613,6 @@ function setupOCPPHandlers(client) {
     return { status: 'Accepted' };
   });
 
-  // Обработчик GetLocalListVersion
   client.handle('GetLocalListVersion', async (payload) => {
     logger.info(`GetLocalListVersion получен: ${JSON.stringify(payload)}`);
     return { listVersion: localAuthList.listVersion };
