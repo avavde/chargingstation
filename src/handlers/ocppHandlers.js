@@ -87,10 +87,11 @@ function setupOCPPHandlers(client) {
     const connectorKey = `${config.stationName}_connector${connectorId}`;
   
     try {
-      logger.debug(`Проверка статуса коннектора ${connectorId}...`);
+      logger.debug(`Проверка статуса коннектора ${connectorId}: ${JSON.stringify(dev[connectorKey])}`); // Добавлено
+  
       if (!dev[connectorKey]) {
         logger.warn(`Коннектор ${connectorId} не инициализирован. Пытаемся синхронизировать...`);
-        dev[connectorKey] = { status: 'Available' }; // Принудительно Available
+        dev[connectorKey] = { status: 'Available' };
       }
   
       if (dev[connectorKey]?.status !== 'Available') {

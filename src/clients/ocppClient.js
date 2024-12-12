@@ -72,20 +72,54 @@ async function initializeOCPPClient() {
       // Полное логирование входящих и исходящих сообщений
       client.on('message', (message) => {
         try {
-          logger.info(`Входящее сообщение: ${JSON.stringify(message, null, 2)}`);
+          const parsedMessage = JSON.parse(message);
+          const [messageType, messageId, actionOrPayload] = parsedMessage;
+      
+          let logDetails = {};
+          if (messageType === 2) { // Запрос от ЦС
+            logDetails = {
+              type: 'Request',
+              messageId,
+              method: actionOrPayload,
+              payload: parsedMessage[3],
+            };
+          } else if (messageType === 3) { // Ответ
+            logDetails = {
+              type: 'Response',
+              messageId,
+              payload: actionOrPayload,
+            };
+          } else if (messageType === 4) { // Ошибка
+            logDetails = {
+              type: 'Error',
+              messageId,
+              errorDetails: actionOrPayload,
+            };
+          }
+      
+          logger.info(`Входящее сообщение OCPP: ${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
-          logger.error(`Ошибка при логировании входящего сообщения: ${error.message}`);
+          logger.error(`Ошибка при парсинге входящего сообщения: ${error.message}`);
+          logger.error(`Содержимое сообщения: ${message}`);
         }
       });
       
       client.on('request', (request) => {
         try {
-          logger.info(`Входящий запрос OCPP: ${JSON.stringify(request, null, 2)}`);
+          const [messageType, messageId, method, payload] = request;
+          const logDetails = {
+            type: 'Request',
+            messageId,
+            method,
+            payload,
+          };
+      
+          logger.info(`Входящий запрос: ${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
-          logger.error(`Ошибка при логировании входящего запроса: ${error.message}`);
+          logger.error(`Ошибка при обработке запроса: ${error.message}`);
         }
       });
-      
+
       client.on('response', (response) => {
         logger.info(`Исходящий ответ OCPP: ${JSON.stringify(response)}`);
       });
