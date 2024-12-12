@@ -80,25 +80,50 @@ function setupOCPPHandlers(client) {
   });
 
   client.handle('RemoteStartTransaction', async (payload) => {
-    logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
+    // Логирование исходного payload
+    logger.info(`Получен полный payload RemoteStartTransaction: ${JSON.stringify(payload, null, 2)}`);
   
     try {
-      const connectorId = Number(payload.connectorId) || 1;
-      const idTag = payload.idTag; // Используем idTag из запроса
+      // Полное логирование для диагностики
+      logger.debug(`Тип полученного payload: ${typeof payload}`);
+      logger.debug(`Ключи payload: ${Object.keys(payload)}`);
   
-      logger.info(`Запуск транзакции для коннектора ${connectorId} с idTag ${idTag}`);
+      // Извлечение данных из payload
+      const idTag = payload?.idTag;
+      const connectorId = payload?.connectorId;
   
-      // Проверка доступности коннектора
-      const connector = config.connectors.find((c) => c.id === connectorId);
-      if (!connector) {
-        logger.error(`Коннектор ${connectorId} не найден в конфигурации.`);
+      logger.info(`Извлеченные параметры: idTag=${idTag}, connectorId=${connectorId}`);
+  
+      // Проверка наличия idTag
+      if (!idTag) {
+        logger.error('idTag отсутствует в запросе RemoteStartTransaction.');
         return { status: 'Rejected' };
       }
   
-      await startTransaction(client, connectorId, idTag); // Передаем корректный idTag
+      // Обработка connectorId: по умолчанию 1, если не передан или некорректен
+      const connectorIdToUse = Number(connectorId) || 1;
+      logger.info(`Запуск транзакции для коннектора: ${connectorIdToUse} с idTag: ${idTag}`);
+  
+      // Проверка наличия коннектора в конфигурации
+      const connector = config.connectors.find((c) => c.id === connectorIdToUse);
+      if (!connector) {
+        logger.error(`Коннектор с ID ${connectorIdToUse} не найден в конфигурации.`);
+        return { status: 'Rejected' };
+      }
+  
+      // Дополнительное логирование статуса коннектора
+      logger.info(`Статус коннектора ${connectorIdToUse}: ${JSON.stringify(connector)}`);
+  
+      // Запуск транзакции
+      logger.info('Инициируем StartTransaction...');
+      await startTransaction(client, connectorIdToUse, idTag);
+  
+      logger.info('StartTransaction успешно отправлен.');
       return { status: 'Accepted' };
     } catch (error) {
+      // Полное логирование ошибок
       logger.error(`Ошибка в обработчике RemoteStartTransaction: ${error.message}`);
+      logger.debug(`Stack Trace: ${error.stack}`);
       return { status: 'Rejected' };
     }
   });
