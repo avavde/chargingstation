@@ -127,28 +127,48 @@ function setupOCPPHandlers(client) {
   });
   
   // Обработчик RemoteStopTransaction
-  client.handle('RemoteStopTransaction', async (payload) => {
-    logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload)}`);
 
-    try {
-      const { transactionId } = payload;
-      const connector = config.connectors.find(
-        (c) => dev[`${config.stationName}_connector${c.id}`].transactionId === transactionId
-      );
+client.handle('RemoteStopTransaction', async (payload) => {
+  // Полное логирование исходного payload
+  logger.info(`Получен полный payload RemoteStopTransaction: ${JSON.stringify(payload, null, 2)}`);
 
-      if (!connector) {
-        logger.error(`Транзакция с ID ${transactionId} не найдена.`);
-        return { status: 'Rejected' };
-      }
+  try {
+    // Проверяем наличие params и корректно извлекаем transactionId
+    const params = payload?.params || payload;
+    const transactionId = params?.transactionId;
 
-      await stopTransaction(client, connector.id);
+    // Логирование извлеченных данных
+    logger.info(`Извлеченные параметры RemoteStopTransaction: transactionId=${transactionId}`);
 
-      return { status: 'Accepted' };
-    } catch (error) {
-      logger.error(`Ошибка в обработчике RemoteStopTransaction: ${error.message}`);
+    // Проверка наличия transactionId
+    if (!transactionId) {
+      logger.error('transactionId отсутствует в запросе RemoteStopTransaction.');
       return { status: 'Rejected' };
     }
-  });
+
+    // Поиск активной транзакции
+    const connector = config.connectors.find((c) =>
+      dev[`${config.stationName}_connector${c.id}`]?.transactionId === transactionId
+    );
+
+    if (!connector) {
+      logger.error(`Транзакция с ID ${transactionId} не найдена.`);
+      return { status: 'Rejected' };
+    }
+
+    // Остановка транзакции
+    logger.info(`Остановка транзакции с ID ${transactionId} для коннектора ${connector.id}`);
+    await stopTransaction(client, connector.id);
+
+    logger.info(`Транзакция с ID ${transactionId} успешно остановлена.`);
+    return { status: 'Accepted' };
+  } catch (error) {
+    // Логирование ошибки с полной трассировкой
+    logger.error(`Ошибка в обработчике RemoteStopTransaction: ${error.message}`);
+    logger.debug(`Stack Trace: ${error.stack}`);
+    return { status: 'Rejected' };
+  }
+});
 
   // Обработчик ChangeAvailability
   client.handle('ChangeAvailability', async (payload) => {
