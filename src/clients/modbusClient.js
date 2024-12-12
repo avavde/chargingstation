@@ -13,9 +13,8 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       reject(new Error('Modbus таймаут'));
     }, timeout);
 
-    // Добавляем минимальную паузу перед чтением
     setTimeout(() => {
-      modbusClient.readInputRegisters(register, length) // Читаем input register
+      modbusClient.readInputRegisters(register, length) // Используем Input Registers
         .then((data) => {
           clearTimeout(timer);
           resolve(data);
