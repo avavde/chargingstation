@@ -72,7 +72,16 @@ async function initializeOCPPClient() {
       // Полное логирование входящих и исходящих сообщений
       client.on('message', (message) => {
         try {
-          const parsedMessage = JSON.parse(message);
+          let parsedMessage;
+      
+          // Проверка: если сообщение - строка, парсим JSON
+          if (typeof message === 'string') {
+            parsedMessage = JSON.parse(message);
+          } else {
+            // Сообщение уже объект, используем напрямую
+            parsedMessage = message;
+          }
+      
           const [messageType, messageId, actionOrPayload] = parsedMessage;
       
           let logDetails = {};
@@ -99,11 +108,11 @@ async function initializeOCPPClient() {
       
           logger.info(`Входящее сообщение OCPP: ${JSON.stringify(logDetails, null, 2)}`);
         } catch (error) {
-          logger.error(`Ошибка при парсинге входящего сообщения: ${error.message}`);
-          logger.error(`Содержимое сообщения: ${message}`);
+          logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
+          logger.error(`Содержимое сообщения: ${typeof message === 'string' ? message : JSON.stringify(message)}`);
         }
       });
-      
+
       client.on('request', (request) => {
         try {
           const [messageType, messageId, method, payload] = request;
