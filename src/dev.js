@@ -1,5 +1,4 @@
-
-const config = require('./config'); // Подключаем конфигурацию
+const config = require('../config/ocpp_config.json'); // Подключаем конфигурацию
 
 // Объект для хранения состояния коннекторов
 const dev = {};
@@ -12,8 +11,8 @@ config.connectors.forEach((connector) => {
     availability: 'Operative',     // Доступность коннектора (Operative или Inoperative)
     transactionId: null,           // ID текущей транзакции (если есть)
     idTag: null,                   // ID тега пользователя (если транзакция активна)
-    Kwt: 0,                        // Показания энергии в кВт·ч
-    Current: 0,                    // Текущий ток в Амперах
+    Energy: 0,                     // Потребленная энергия (в kWh)
+    Power: 0,                      // Текущая мощность (в kW)
     Summ: 0,                       // Сумма к оплате
     meterSerialNumber: null,       // Серийный номер счетчика
   };
