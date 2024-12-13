@@ -13,8 +13,8 @@
       "powerRegister": 8966,          
       "serialNumberRegister": 1000,   
       "typeNumber": 3,
-      "energyScale": 24414.11,          
-      "powerScale": 24414.11            
+      "energyScale": 2441411,          
+      "powerScale": 2441411            
     }
   ],
   "modbusPort": "/dev/ttymxc4",      
