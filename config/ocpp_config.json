@@ -13,7 +13,7 @@
       "currentRegister": 5220,       
       "serialNumberRegister": 1000,   
       "typeNumber": 3
-    },
+    }
   ],
   "modbusPort": "/dev/ttymxc4",      
   "modbusBaudRate": 9600,           
