@@ -3,7 +3,7 @@ const dev = require('../dev');
 const logger = require('./logger');
 const config = require('../config');
 const { sendStatusNotification } = require('./ocppUtils');
-const { getMeterReading } = require('../clients/modbusClient');
+const { readEnergyAndPower } = require('../clients/modbusClient');
 
 async function startTransaction(client, connectorId, idTag) {
   const connectorKey = `${config.stationName}_connector${connectorId}`;
@@ -21,7 +21,7 @@ async function startTransaction(client, connectorId, idTag) {
 
   try {
     // Считываем начальные показания счетчика
-    const meterStart = await getMeterReading(connectorId);
+    const meterStart = await readEnergyAndPower(connectorId);
     logger.info(`Начальные показания счетчика для connectorId=${connectorId}: ${meterStart} kWh`);
 
     // Обновляем состояние коннектора
@@ -82,7 +82,7 @@ async function stopTransaction(client, connectorId) {
 
   try {
     // Считываем финальные показания счетчика
-    const meterStop = await getMeterReading(connectorId);
+    const meterStop = await readEnergyAndPower(connectorId);
     logger.info(`Финальные показания счетчика для connectorId=${connectorId}: ${meterStop} kWh`);
 
     const { transactionId, idTag } = dev[connectorKey];
