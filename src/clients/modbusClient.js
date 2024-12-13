@@ -11,7 +11,7 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       reject(new Error('Modbus таймаут'));
     }, timeout);
 
-    modbusClient.readInputRegisters(register, length)
+    modbusClient.readInputRegisters(register, length) 
       .then((data) => {
         clearTimeout(timer);
         resolve(data);
@@ -22,6 +22,7 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       });
   });
 }
+
 
 // Инициализация Modbus клиента
 async function initializeModbusClient() {
