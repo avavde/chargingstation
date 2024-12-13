@@ -48,12 +48,12 @@ async function readEnergyAndPower(connector) {
     // Чтение накопленной энергии
     const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
     const energyRaw = energyData.buffer.readInt32BE(0);
-    const energy = Math.abs(energyRaw) * connector.energyScale; // Применяем коэффициент и модуль
+    const energy = Math.abs(energyRaw) / connector.energyScale; // Применяем коэффициент и модуль
 
     // Чтение мгновенной мощности
     const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
     const powerRaw = powerData.buffer.readInt32BE(0);
-    const power = Math.abs(powerRaw) * connector.powerScale; // Применяем коэффициент и модуль
+    const power = Math.abs(powerRaw) / connector.powerScale; // Применяем коэффициент и модуль
 
     logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
     return { energy, power };
