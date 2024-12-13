@@ -139,13 +139,16 @@ async function sendMeterValues(client, connectorId, transactionId, energy, power
     ]
   };
 
+  logger.debug(`Формируем MeterValues: ${JSON.stringify(meterValuesPayload, null, 2)}`);
+
   try {
-    await client.call('MeterValues', meterValuesPayload);
-    logger.info(`MeterValues отправлены: connectorId=${connectorId}, энергия=${energy} kWh, мощность=${power} kW`);
+    const response = await client.call('MeterValues', meterValuesPayload);
+    logger.info(`MeterValues отправлены: ${JSON.stringify(response, null, 2)}`);
   } catch (error) {
     logger.error(`Ошибка отправки MeterValues: ${error.message}`);
   }
 }
+
 
 
 
