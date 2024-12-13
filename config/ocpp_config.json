@@ -9,8 +9,8 @@
       "id": 1,
       "relayPath": "/sys/class/gpio/gpio122/value",
       "meterAddress": 1,              
-      "meterRegister": 4864,          
-      "currentRegister": 5220,       
+      "energyRegister": 4352,         
+      "powerRegister": 4864,          
       "serialNumberRegister": 1000,   
       "typeNumber": 3
     }

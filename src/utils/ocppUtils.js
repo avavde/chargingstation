@@ -112,54 +112,41 @@ async function sendDiagnosticsStatusNotification(client, status) {
   }
 }
 
-async function sendMeterValues(client, connectorId) {
-  const connectorKey = `${config.stationName}_connector${connectorId}`;
-  const { transactionId } = dev[connectorKey];
-
-  if (!transactionId) {
-    logger.warn(`Отправка MeterValues пропущена: Нет активной транзакции для connectorId=${connectorId}`);
-    return;
-  }
+async function sendMeterValues(client, connectorId, transactionId, energy, power) {
+  const meterValuesPayload = {
+    connectorId,
+    transactionId,
+    meterValue: [
+      {
+        timestamp: new Date().toISOString(),
+        sampledValue: [
+          {
+            value: energy.toFixed(2),
+            context: "Sample.Periodic",
+            format: "Raw",
+            measurand: "Energy.Active.Import.Register",
+            unit: "kWh"
+          },
+          {
+            value: power.toFixed(2),
+            context: "Sample.Periodic",
+            format: "Raw",
+            measurand: "Power.Active.Import",
+            unit: "kW"
+          }
+        ]
+      }
+    ]
+  };
 
   try {
-    // Чтение реального значения счётчика
-    const connector = config.connectors.find(c => c.id === connectorId);
-    const meterData = await readWithTimeout(connector.meterRegister, 2, 1000);
-
-    // Обрабатываем данные: конвертируем в float
-    const meterReading = meterData.buffer.readFloatBE(0);
-    const meterValue = meterReading.toFixed(3); // Округляем до 3 знаков после запятой
-
-    logger.info(`MeterValues: connectorId=${connectorId}, value=${meterValue} kWh`);
-
-    // Формирование payload для MeterValues
-    const payload = {
-      connectorId,
-      transactionId,
-      meterValue: [
-        {
-          timestamp: new Date().toISOString(),
-          sampledValue: [
-            {
-              value: meterValue, // Значение должно быть строкой с числом
-              context: "Sample.Periodic", // Контекст: регулярное измерение
-              format: "Raw",
-              measurand: "Energy.Active.Import.Register", // OCPP 1.6 стандартный measurand
-              unit: "kWh" // Единица измерения
-            }
-          ]
-        }
-      ]
-    };
-
-    // Отправка данных в центральную систему
-    await client.call('MeterValues', payload);
-    logger.info(`MeterValues отправлены для connectorId=${connectorId}, value=${meterValue} kWh`);
-
+    await client.call('MeterValues', meterValuesPayload);
+    logger.info(`MeterValues отправлены: connectorId=${connectorId}, энергия=${energy} kWh, мощность=${power} kW`);
   } catch (error) {
-    logger.error(`Ошибка при отправке MeterValues для connectorId=${connectorId}: ${error.message}`);
+    logger.error(`Ошибка отправки MeterValues: ${error.message}`);
   }
 }
+
 
 
 
