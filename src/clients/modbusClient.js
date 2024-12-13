@@ -11,17 +11,15 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       reject(new Error('Modbus таймаут'));
     }, timeout);
 
-    setTimeout(() => {
-      modbusClient.readInputRegisters(register, length)
-        .then((data) => {
-          clearTimeout(timer);
-          resolve(data);
-        })
-        .catch((error) => {
-          clearTimeout(timer);
-          reject(new Error(`Ошибка Modbus: ${error.message}`));
-        });
-    }, 100);
+    modbusClient.readInputRegisters(register, length)
+      .then((data) => {
+        clearTimeout(timer);
+        resolve(data);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(new Error(`Ошибка Modbus: ${error.message}`));
+      });
   });
 }
 
@@ -42,22 +40,23 @@ async function initializeModbusClient() {
   }
 }
 
-// Получение текущего показания счётчика
-async function getMeterReading(connectorId) {
-  const connector = config.connectors.find(c => c.id === connectorId);
-  if (!connector) {
-    throw new Error(`Коннектор с ID ${connectorId} не найден.`);
-  }
-
+// Чтение энергии и мощности
+async function readEnergyAndPower(connector) {
   try {
     modbusClient.setID(connector.meterAddress);
-    const data = await readWithTimeout(connector.meterRegister, 2, 2000);
-    const meterReading = data.buffer.readFloatBE(0); // Предполагаем показания в kWh
-    logger.info(`Текущие показания счётчика для коннектора ${connectorId}: ${meterReading} kWh`);
-    return meterReading;
+
+    // Чтение энергии
+    const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
+    const energy = energyData.buffer.readInt32BE(0) * 0.01; // Масштабирование для kWh
+
+    // Чтение мощности
+    const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
+    const power = powerData.buffer.readInt32BE(0) * 0.001; // Масштабирование для kW
+
+    logger.debug(`Энергия: ${energy} kWh, Мощность: ${power} kW`);
+    return { energy, power };
   } catch (error) {
-    logger.error(`Ошибка при считывании показаний счётчика: ${error.message}`);
-    throw error;
+    throw new Error(`Ошибка Modbus чтения: ${error.message}`);
   }
 }
 
@@ -65,5 +64,5 @@ module.exports = {
   modbusClient,
   initializeModbusClient,
   readWithTimeout,
-  getMeterReading,
+  readEnergyAndPower,
 };
