@@ -21,8 +21,8 @@ async function startTransaction(client, connectorId, idTag) {
 
   try {
     // Считываем начальные показания счетчика
-    const meterStart = await readEnergyAndPower(connectorId);
-    logger.info(`Начальные показания счетчика для connectorId=${connectorId}: ${meterStart} kWh`);
+    const { energy } = await readEnergyAndPower(connectorConfig); // Передаём конфигурацию коннектора
+    logger.info(`Начальные показания счетчика для connectorId=${connectorId}: ${energy} kWh`);
 
     // Обновляем состояние коннектора
     dev[connectorKey].status = 'Preparing';
@@ -35,7 +35,7 @@ async function startTransaction(client, connectorId, idTag) {
     const response = await client.call('StartTransaction', {
       connectorId,
       idTag,
-      meterStart: Math.round(meterStart * 1000), // В OCPP единицах (Вт·ч)
+      meterStart: Math.round(energy * 1000), // В OCPP единицах (Вт·ч)
       timestamp: new Date().toISOString(),
     });
 
@@ -51,7 +51,7 @@ async function startTransaction(client, connectorId, idTag) {
     // Сохраняем transactionId и статус Charging
     dev[connectorKey].transactionId = response.transactionId;
     dev[connectorKey].status = 'Charging';
-    dev[connectorKey].meterStart = meterStart;
+    dev[connectorKey].meterStart = energy;
 
     await sendStatusNotification(client, connectorId, 'Charging', 'NoError');
     logger.info(`Транзакция успешно начата для connectorId=${connectorId}, transactionId=${response.transactionId}`);
