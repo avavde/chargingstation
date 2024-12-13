@@ -10,7 +10,7 @@
       "relayPath": "/sys/class/gpio/gpio122/value",
       "meterAddress": 1,              
       "energyRegister": 8716,         
-      "powerRegister": 8916,          
+      "powerRegister": 8966,          
       "serialNumberRegister": 1000,   
       "typeNumber": 3,
       "energyScale": 0.0002441411,          
