@@ -1,32 +1,8 @@
-const { modbusClient, readWithTimeout, initializeModbusClient } = require('../clients/modbusClient');
+const { modbusClient, initializeModbusClient, readEnergyAndPower } = require('../clients/modbusClient');
 const config = require('../config');
 const dev = require('../dev');
 const logger = require('./logger');
 const { sendStatusNotification, sendMeterValues } = require('./ocppUtils');
-
-/**
- * Чтение данных Modbus: Энергия и Мощность
- * @param {Object} connector - Конфигурация коннектора
- * @returns {Object} { energy, power }
- */
-async function readEnergyAndPower(connector) {
-  try {
-    modbusClient.setID(connector.meterAddress);
-
-    // Чтение энергии (4 байта, s32 big-endian)
-    const energyData = await readWithTimeout(connector.energyRegister, 2, 1000); // 2 регистра = 4 байта
-    const energy = energyData.buffer.readInt32BE(0) * 0.01; // Масштабирование 0.01 для kWh
-
-    // Чтение мощности (4 байта, s32 big-endian)
-    const powerData = await readWithTimeout(connector.powerRegister, 2, 1000);
-    const power = powerData.buffer.readInt32BE(0) * 0.001; // Масштабирование 0.001 для kW
-
-    logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
-    return { energy, power };
-  } catch (error) {
-    throw new Error(`Ошибка чтения Modbus (Коннектор ${connector.id}): ${error.message}`);
-  }
-}
 
 /**
  * Опрос данных с коннектора

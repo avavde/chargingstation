@@ -11,7 +11,7 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       reject(new Error('Modbus таймаут'));
     }, timeout);
 
-    modbusClient.readInputRegisters(register, length) 
+    modbusClient.readInputRegisters(register, length) // Используем Input Registers (0x04)
       .then((data) => {
         clearTimeout(timer);
         resolve(data);
@@ -22,7 +22,6 @@ async function readWithTimeout(register, length = 2, timeout = 2000) {
       });
   });
 }
-
 
 // Инициализация Modbus клиента
 async function initializeModbusClient() {
@@ -46,18 +45,18 @@ async function readEnergyAndPower(connector) {
   try {
     modbusClient.setID(connector.meterAddress);
 
-    // Чтение энергии
-    const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
-    const energy = energyData.buffer.readInt32BE(0) * 0.01; // Масштабирование для kWh
+    // Чтение энергии (Input Registers, s32 Big Endian)
+    const energyData = await readWithTimeout(connector.energyRegister, 2, 2000); // 2 регистра (4 байта)
+    const energy = energyData.buffer.readInt32BE(0) * 0.01; // Масштабирование 0.01 для kWh
 
-    // Чтение мощности
+    // Чтение мощности (Input Registers, s32 Big Endian)
     const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
-    const power = powerData.buffer.readInt32BE(0) * 0.001; // Масштабирование для kW
+    const power = powerData.buffer.readInt32BE(0) * 0.001; // Масштабирование 0.001 для kW
 
-    logger.debug(`Энергия: ${energy} kWh, Мощность: ${power} kW`);
+    logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
     return { energy, power };
   } catch (error) {
-    throw new Error(`Ошибка Modbus чтения: ${error.message}`);
+    throw new Error(`Ошибка чтения Modbus (Коннектор ${connector.id}): ${error.message}`);
   }
 }
 
