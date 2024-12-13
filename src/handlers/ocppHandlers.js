@@ -111,17 +111,21 @@ client.handle('RemoteStopTransaction', async (payload) => {
       return { status: 'Rejected' };
     }
 
+    logger.debug(`Поиск транзакции с ID=${transactionId}`);
+
     // Поиск активного коннектора
     const activeConnector = Object.entries(dev).find(
       ([, data]) => data.transactionId === transactionId
     );
 
     if (!activeConnector) {
-      logger.error(`Транзакция с ID ${transactionId} не найдена.`);
+      logger.error(`Транзакция с ID ${transactionId} не найдена среди активных.`);
+      logger.debug(`Текущее состояние dev: ${JSON.stringify(dev, null, 2)}`);
       return { status: 'Rejected' };
     }
 
     const connectorId = parseInt(activeConnector[0].split('_')[1]);
+    logger.debug(`Найден коннектор: connectorId=${connectorId} для транзакции ${transactionId}`);
 
     // Используем stopTransaction из transactionManager
     await stopTransaction(client, connectorId);
@@ -134,7 +138,6 @@ client.handle('RemoteStopTransaction', async (payload) => {
   }
 });
 
-  
  
   client.handle('ChangeAvailability', async (payload) => {
     logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
