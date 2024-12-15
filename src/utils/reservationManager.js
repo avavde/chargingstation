@@ -1,6 +1,6 @@
 // src/utils/reservationManager.js
 
-const dev = require('../dev');
+const { dev } =quire('../dev');
 const { sendStatusNotification } = require('./ocppUtils');
 const logger = require('./logger');
 
