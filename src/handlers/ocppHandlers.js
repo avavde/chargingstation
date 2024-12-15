@@ -68,29 +68,47 @@ function setupOCPPHandlers(client) {
 
     return { status: 'Accepted', data: 'Data processed' };
   });
+
 // RemoteStartTransaction
 client.handle('RemoteStartTransaction', async (payload) => {
   logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
 
   try {
-    const { idTag, connectorId } = payload?.params || payload;
+    // Сначала определяем, где действительно лежит полезная нагрузка.
+    // Иногда сервер отправляет payload.params, иногда сам payload.
+    // Далее извлекаем нужные поля.
+    const realPayload = payload.params ?? payload; 
+    const { idTag, connectorId, chargingProfile } = realPayload;
 
     if (!idTag) {
       logger.error('idTag отсутствует в запросе RemoteStartTransaction.');
       return { status: 'Rejected' };
     }
 
-    const connectorIdToUse = connectorId || 1;
-    logger.info(`Инициируем StartTransaction для connectorId=${connectorIdToUse} с idTag=${idTag}`);
+    // Преобразуем connectorId к числу, если он пришёл строкой ("1" -> 1).
+    // Если connectorId не задан или некорректен, используем 1 по умолчанию.
+    let connectorIdToUse = parseInt(connectorId, 10);
+    if (isNaN(connectorIdToUse) || connectorIdToUse < 1) {
+      connectorIdToUse = 1;
+      logger.warn(`Некорректный connectorId (${connectorId}), будет использоваться коннектор 1 по умолчанию.`);
+    }
 
-    // Используем startTransaction из transactionManager
-    const response = await startTransaction(client, connectorIdToUse, idTag);
+  const connectorExists = config.connectors.some(c => c.id === connectorIdToUse);
+if (!connectorExists) {
+ logger.error(`Коннектор с ID=${connectorIdToUse} не найден в конфигурации.`);
+ return { status: 'Rejected' };
+ }
+
+    logger.info(`Инициируем StartTransaction для connectorId=${connectorIdToUse} с idTag=${idTag}${chargingProfile ? `, chargingProfile=${chargingProfile}` : ''}`);
+
+    // Вызываем startTransaction из вашего transactionManager
+    const response = await startTransaction(client, connectorIdToUse, idTag, chargingProfile);
 
     if (response && response.transactionId) {
       logger.info(`StartTransaction успешно: transactionId=${response.transactionId}`);
       return { status: 'Accepted' };
     } else {
-      logger.error('StartTransaction не принят.');
+      logger.error('StartTransaction не принят сервером.');
       return { status: 'Rejected' };
     }
   } catch (error) {
@@ -99,44 +117,55 @@ client.handle('RemoteStartTransaction', async (payload) => {
   }
 });
 
+
 // RemoteStopTransaction
 client.handle('RemoteStopTransaction', async (payload) => {
   logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload)}`);
 
   try {
-    const transactionId = payload?.transactionId || payload?.params?.transactionId;
+    const realPayload = payload.params ?? payload; 
+    let { transactionId } = realPayload;
 
     if (!transactionId) {
       logger.error('transactionId отсутствует в запросе RemoteStopTransaction.');
       return { status: 'Rejected' };
     }
 
-    logger.debug(`Поиск транзакции с ID=${transactionId}`);
+    // Если в dev.transactionId хранится как число - приводим к числу:
+    // (если dev.transactionId тоже строка, то можно оставить без parseInt и сравнивать строку со строкой)
+    const transactionIdNum = parseInt(transactionId, 10);
+    if (isNaN(transactionIdNum)) {
+      logger.error(`Некорректный формат transactionId: ${transactionId}`);
+      return { status: 'Rejected' };
+    }
+
+    logger.debug(`Поиск транзакции с ID=${transactionIdNum} в dev...`);
 
     // Поиск активного коннектора
     const activeConnector = Object.entries(dev).find(
-      ([, data]) => data.transactionId === transactionId
+      ([, data]) => data.transactionId === transactionIdNum  // сравнение как число
     );
 
     if (!activeConnector) {
-      logger.error(`Транзакция с ID ${transactionId} не найдена среди активных.`);
+      logger.error(`Транзакция с ID ${transactionIdNum} не найдена среди активных.`);
       logger.debug(`Текущее состояние dev: ${JSON.stringify(dev, null, 2)}`);
       return { status: 'Rejected' };
     }
 
-    const connectorId = parseInt(activeConnector[0].split('_')[1]);
-    logger.debug(`Найден коннектор: connectorId=${connectorId} для транзакции ${transactionId}`);
+    const connectorId = parseInt(activeConnector[0].split('_')[1], 10);
+    logger.debug(`Найден коннектор: connectorId=${connectorId} для транзакции ${transactionIdNum}`);
 
     // Используем stopTransaction из transactionManager
     await stopTransaction(client, connectorId);
 
-    logger.info(`Транзакция ${transactionId} успешно завершена.`);
+    logger.info(`Транзакция ${transactionIdNum} успешно завершена.`);
     return { status: 'Accepted' };
   } catch (error) {
     logger.error(`Ошибка RemoteStopTransaction: ${error.message}`);
     return { status: 'Rejected' };
   }
 });
+
 
  
   client.handle('ChangeAvailability', async (payload) => {
