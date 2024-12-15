@@ -503,10 +503,10 @@ client.handle('RemoteStopTransaction', async (payload) => {
 
   client.handle('TriggerMessage', async (payload) => {
     logger.info(`TriggerMessage получен: ${JSON.stringify(payload)}`);
-
+  
     const { requestedMessage, connectorId } = payload;
     let status = 'Accepted';
-
+  
     switch (requestedMessage) {
       case 'BootNotification':
         await client.call('BootNotification', {
@@ -514,25 +514,40 @@ client.handle('RemoteStopTransaction', async (payload) => {
           chargePointModel: config.model,
           chargePointSerialNumber: config.stationName,
           firmwareVersion: '1.0',
-          meterSerialNumber: 'Unknown',
+          meterSerialNumber: 'Unknown'
         });
         break;
+  
       case 'StatusNotification':
+        // При желании подтягиваем текущий статус из dev
         const connectorKey = `${config.stationName}_connector${connectorId}`;
-        const connStatus = dev[connectorKey]?.status || 'Unavailable';
-        await sendStatusNotification(client, connectorId, connStatus, 'NoError');
+        const currentStatus = dev[connectorKey]?.status || 'Unavailable';
+        await sendStatusNotification(client, connectorId, currentStatus, 'NoError');
         break;
+  
       case 'MeterValues':
-        await sendMeterValues(client, connectorId);
+        await sendMeterValues(client, connectorId, /* transactionId */, /* energy */, /* power */);
         break;
+  
+      case 'DiagnosticsStatusNotification':
+        // Допустим, шлём 'Idle' или 'Uploading' по желанию
+        await sendDiagnosticsStatusNotification(client, 'Idle');
+        break;
+  
+      case 'FirmwareStatusNotification':
+        // Допустим, шлём 'Idle' или 'Downloading' или 'Installed'
+        await sendFirmwareStatusNotification(client, 'Idle');
+        break;
+  
       default:
         status = 'NotImplemented';
         logger.warn(`Запрошенное сообщение ${requestedMessage} не поддерживается.`);
         break;
     }
-
+  
     return { status };
   });
+  
 
   client.handle('SetChargingProfile', async (payload) => {
     logger.info(`SetChargingProfile получен: ${JSON.stringify(payload)}`);
