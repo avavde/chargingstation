@@ -1,0 +1,29 @@
+{
+    "centralSystemUrl": "wss://proxy.volttime.com/v1/",
+    "protocol": "OCPP 1.6 JSON",
+    "stationName": "avade",
+    "vendor": "Electricus",
+    "model": "Frankenstein",
+    "pinCode": "8431",
+    "connectors": [
+      {
+        "id": 1,
+        "relayPath": "/sys/class/gpio/gpio122/value",
+        "meterAddress": 1,              
+        "energyRegister": 8716,         
+        "powerRegister": 8966,          
+        "serialNumberRegister": 1000,   
+        "typeNumber": 3,
+        "energyScale": 2441411,          
+        "powerScale": 2441411            
+      }
+    ],
+    "modbusPort": "/dev/ttymxc4",      
+    "modbusBaudRate": 9600,           
+    "modbusParity": "none",          
+    "modbusDataBits": 8,              
+    "modbusStopBits": 2,             
+    "pricePerKwh": 5.0,
+    "modemPort": "/dev/ttyUSB0"
+  }
+  
