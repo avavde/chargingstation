@@ -1,7 +1,6 @@
 
 const logger = require('./logger');
 const { pollAndCacheConnectorData, getCachedModbusData } = require('../clients/modbusClient');
-const config = require('../config');
 
 async function updateModbusData(client) {
   logger.info('Запуск обновления данных Modbus...');
