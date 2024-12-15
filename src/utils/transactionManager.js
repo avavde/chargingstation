@@ -71,8 +71,10 @@ async function startTransaction(client, connectorId, idTag) {
   }
 }
 
+
+
 /**
- * Стоп транзакции для коннектора.
+ * Завершение транзакции для коннектора.
  * @param {Object} client - OCPP клиент.
  * @param {number} connectorId - ID коннектора.
  */
@@ -85,32 +87,38 @@ async function stopTransaction(client, connectorId) {
     return;
   }
 
-  if (!dev[connectorKey]?.transactionId) {
+  const transactionId = dev[connectorKey]?.transactionId;
+
+  if (!transactionId) {
     logger.warn(`Нет активной транзакции для connectorId=${connectorId}`);
     return;
   }
 
   try {
-    // Получаем финальные показания из кэша
-    const { energy } = getCachedModbusData(connectorId);
-    logger.info(`Финальные показания счетчика для connectorId=${connectorId}: ${energy} kWh`);
-
-    const { transactionId, idTag } = dev[connectorKey];
+    // Получаем финальные данные из Modbus кэша
+    const cachedData = getCachedModbusData(connectorId);
+    const finalEnergy = cachedData?.Energy || 0; // Используем 0 по умолчанию
+    logger.info(`Финальные показания для connectorId=${connectorId}: ${finalEnergy} kWh`);
 
     // Отправляем StopTransaction
-    await client.call('StopTransaction', {
+    const payload = {
       transactionId,
-      idTag,
-      meterStop: Math.round(energy * 1000), // В OCPP единицах (Вт·ч)
+      idTag: dev[connectorKey]?.idTag,
+      meterStop: Math.round(finalEnergy * 1000), // Переводим в Wh
       timestamp: new Date().toISOString(),
-    });
+    };
 
-    // Выключаем реле и обновляем состояние
-    controlRelay(connectorConfig.relayPath, false);
+    logger.debug(`Отправляем StopTransaction: ${JSON.stringify(payload)}`);
+    await client.call('StopTransaction', payload);
+
+    // Обновляем состояние коннектора
+    controlRelay(connectorConfig.relayPath, false); // Выключаем реле
     dev[connectorKey].transactionId = null;
     dev[connectorKey].status = 'Available';
     dev[connectorKey].idTag = null;
+    dev[connectorKey].Energy = 0; // Сбрасываем показания энергии
 
+    // Отправляем статус "Available"
     await sendStatusNotification(client, connectorId, 'Available', 'NoError');
     logger.info(`Транзакция завершена для connectorId=${connectorId}`);
   } catch (error) {
