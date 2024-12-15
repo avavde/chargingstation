@@ -1,10 +1,10 @@
 const ModbusRTU = require('modbus-serial');
-const AsyncLock = require('async-lock');
+const { Mutex } = require('async-mutex');
 const logger = require('../utils/logger');
 const config = require('../config');
 
 const modbusClient = new ModbusRTU();
-const lock = new AsyncLock(); // Создаем мьютекс для защиты доступа к Modbus
+const modbusMutex = new Mutex(); // Создаем мьютекс
 
 // Таймаут для чтения регистров
 async function readWithTimeout(register, length = 2, timeout = 2000) {
@@ -42,9 +42,9 @@ async function initializeModbusClient() {
   }
 }
 
-// Чтение накопленной энергии и мощности через мьютекс
+// Чтение накопленной энергии и мощности с мьютексом
 async function readEnergyAndPower(connector) {
-  return lock.acquire('modbus', async () => { // Используем мьютекс для защиты доступа
+  return await modbusMutex.runExclusive(async () => { // Используем мьютекс
     try {
       modbusClient.setID(connector.meterAddress);
 
@@ -68,7 +68,4 @@ async function readEnergyAndPower(connector) {
 
 module.exports = {
   modbusClient,
-  initializeModbusClient,
-  readWithTimeout,
-  readEnergyAndPower,
-};
+  initializeMod
