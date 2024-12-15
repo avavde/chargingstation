@@ -526,8 +526,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
         break;
   
       case 'MeterValues':
-        await sendMeterValues(client, connectorId, /* transactionId */, /* energy */, /* power */);
-        break;
+        await sendMeterValues(client, connectorId, transactionId , energy , power);
   
       case 'DiagnosticsStatusNotification':
         // Допустим, шлём 'Idle' или 'Uploading' по желанию
