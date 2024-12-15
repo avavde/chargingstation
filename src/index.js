@@ -19,8 +19,18 @@ const { dev, saveDevToFile } = require('./dev');
 setupErrorHandlers();
 
 // Пути к лог-файлам сообщений
-const inMessagesLog = path.join(__dirname, './logs/in-messages.log');
-const outMessagesLog = path.join(__dirname, './logs/out-messages.log');
+const logDir = path.join(__dirname, './logs');
+const inMessagesLog = path.join(logDir, 'in-messages.log');
+const outMessagesLog = path.join(logDir, 'out-messages.log');
+
+// Создание директории для логов, если она отсутствует
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
+
+// Создание файлов логов, если они отсутствуют
+if (!fs.existsSync(inMessagesLog)) fs.writeFileSync(inMessagesLog, '');
+if (!fs.existsSync(outMessagesLog)) fs.writeFileSync(outMessagesLog, '');
 
 // Функция для логирования сообщений
 function logMessage(message, type) {
@@ -48,12 +58,11 @@ function logMessage(message, type) {
         dev[connectorKey].status = 'Unavailable';
         dev[connectorKey].availability = 'Inoperative';
       }
-      saveDevToFile(dev); // Сохраняем обновленное состояние dev
+      saveDevToFile(dev);
     } else {
       logger.info('Modbus-клиент успешно подключен.');
     }
 
-    // Получаем информацию о модеме
     const modemInfo = await getModemInfo();
     logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
 
@@ -61,22 +70,19 @@ function logMessage(message, type) {
     await initializeOCPPClient();
     const client = getClient();
 
-    // Обработчики для логирования сообщений
+    // Логирование всех сообщений
     client.on('message', (rawMsg) => {
       const parsedMessage = JSON.parse(rawMsg.message || '{}');
       const direction = rawMsg.outbound ? 'OUT' : 'IN';
       logMessage(parsedMessage, direction);
     });
 
-    // Устанавливаем OCPP-обработчики
     setupOCPPHandlers(client);
 
-    // Отправка BootNotification и StatusNotification
     await sendBootNotification(client, modemInfo);
     await sendInitialStatusNotifications(client);
-    saveDevToFile(dev); // Сохраняем состояние после отправки уведомлений
+    saveDevToFile(dev);
 
-    // Статусы коннекторов при отсутствии Modbus
     if (!modbusConnected) {
       for (const connector of config.connectors) {
         await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
@@ -86,10 +92,9 @@ function logMessage(message, type) {
       updateModbusData(client);
     }
 
-    // Проверка бронирований каждые 60 секунд
     setInterval(() => {
       checkReservations(client);
-      saveDevToFile(dev); // Сохраняем состояние после проверки бронирований
+      saveDevToFile(dev);
     }, 60000);
 
     logger.info('Приложение успешно запущено.');

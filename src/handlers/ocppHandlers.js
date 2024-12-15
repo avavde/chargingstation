@@ -10,7 +10,7 @@ const {
 const { addReservation, removeReservation, reservations } = require('../utils/reservationManager');
 const logger = require('../utils/logger');
 const config = require('../config');
-const { dev } =quire('../dev');
+const { dev } = require('../dev');
 const { controlRelay } = require('../utils/relayControl');
 const { modbusClient } = require('../clients/modbusClient');
 const { exec } = require('child_process');

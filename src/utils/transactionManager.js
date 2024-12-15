@@ -1,5 +1,5 @@
 const { controlRelay } = require('./relayControl');
-const { dev } =quire('../dev');
+const { dev } = require('../dev');
 const logger = require('./logger');
 const config = require('../config');
 const { sendStatusNotification, sendMeterValues } = require('./ocppUtils');

@@ -1,6 +1,6 @@
 // utils/ocppUtils.js
 const logger = require('./logger');
-const { dev, saveDevToFile } = require('../data/dev');
+const { dev, saveDevToFile } = require('../dev');
 const config = require('../config');
 const { readWithTimeout } = require('../clients/modbusClient'); // Импортируем необходимые функции
 const { modbusClient } = require('../clients/modbusClient'); // Импортируем modbusClient, если требуется
