@@ -1,5 +1,5 @@
-// src/index.js
-
+const fs = require('fs');
+const path = require('path');
 const config = require('./config');
 const { initializeOCPPClient, getClient } = require('./clients/ocppClient');
 const { initializeModbusClient, modbusClient } = require('./clients/modbusClient');
@@ -14,12 +14,30 @@ const {
   sendStatusNotification,
 } = require('./utils/ocppUtils');
 const logger = require('./utils/logger');
-const dev = require('./dev');
+const { dev, saveDevToFile } = require('./dev');
 
 setupErrorHandlers();
 
+// Пути к лог-файлам сообщений
+const inMessagesLog = path.join(__dirname, './logs/in-messages.log');
+const outMessagesLog = path.join(__dirname, './logs/out-messages.log');
+
+// Функция для логирования сообщений
+function logMessage(message, type) {
+  const timestamp = new Date().toISOString();
+  const logLine = `[${timestamp}] ${type}: ${JSON.stringify(message)}\n`;
+  const filePath = type === 'IN' ? inMessagesLog : outMessagesLog;
+
+  fs.appendFile(filePath, logLine, (err) => {
+    if (err) {
+      console.error(`Ошибка записи в лог-файл (${filePath}): ${err.message}`);
+    }
+  });
+}
+
 (async () => {
   try {
+    // Инициализация Modbus-клиента
     await initializeModbusClient();
 
     const modbusConnected = modbusClient.isOpen;
@@ -29,48 +47,53 @@ setupErrorHandlers();
         const connectorKey = `${config.stationName}_connector${connector.id}`;
         dev[connectorKey].status = 'Unavailable';
         dev[connectorKey].availability = 'Inoperative';
-        // Теперь передаем client, но у нас его еще нет! Нужно сначала инициализировать OCPP-клиент и получить client.
-        // Поэтому пока не вызываем sendStatusNotification здесь. Запомним изменение статуса, а StatusNotification отправим позже.
       }
+      saveDevToFile(dev); // Сохраняем обновленное состояние dev
     } else {
       logger.info('Modbus-клиент успешно подключен.');
     }
 
+    // Получаем информацию о модеме
     const modemInfo = await getModemInfo();
     logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
 
+    // Инициализация OCPP-клиента
     await initializeOCPPClient();
-    const client = getClient(); // Получаем OCPP-клиент после инициализации
+    const client = getClient();
 
+    // Обработчики для логирования сообщений
+    client.on('message', (rawMsg) => {
+      const parsedMessage = JSON.parse(rawMsg.message || '{}');
+      const direction = rawMsg.outbound ? 'OUT' : 'IN';
+      logMessage(parsedMessage, direction);
+    });
+
+    // Устанавливаем OCPP-обработчики
     setupOCPPHandlers(client);
 
+    // Отправка BootNotification и StatusNotification
     await sendBootNotification(client, modemInfo);
-
     await sendInitialStatusNotifications(client);
+    saveDevToFile(dev); // Сохраняем состояние после отправки уведомлений
 
-    // Теперь, если Modbus не был инициализирован, мы можем отправить StatusNotification для коннекторов Unavailable
+    // Статусы коннекторов при отсутствии Modbus
     if (!modbusConnected) {
-      logger.warn('Modbus-клиент не инициализирован, отправляем StatusNotification Unavailable для всех коннекторов...');
       for (const connector of config.connectors) {
-        const connectorKey = `${config.stationName}_connector${connector.id}`;
-        // Статус уже установлен в Unavailable, теперь отправим StatusNotification с client
         await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
       }
-    }
-
-    // Запускаем обновление данных Modbus только если подключение успешно
-    if (modbusConnected) {
-      updateModbusData(client); // Передаем client первым аргументом
+      saveDevToFile(dev);
     } else {
-      logger.warn('Данные Modbus не будут обновляться из-за отсутствия подключения.');
+      updateModbusData(client);
     }
 
-    // Установка периодической проверки истечения бронирований
-    setInterval(() => checkReservations(client), 60000); // Передаем client
+    // Проверка бронирований каждые 60 секунд
+    setInterval(() => {
+      checkReservations(client);
+      saveDevToFile(dev); // Сохраняем состояние после проверки бронирований
+    }, 60000);
 
     logger.info('Приложение успешно запущено.');
   } catch (error) {
     logger.error(`Ошибка при запуске приложения: ${error.message}`);
-    // Не завершаем процесс, продолжаем работу
   }
 })();

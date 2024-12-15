@@ -53,17 +53,18 @@ if (savedState) {
   saveDevToFile(dev); // Сохраняем начальное состояние
 }
 
-// Обновление состояния dev
+// Обновление состояния dev с автоматическим сохранением
 function updateDevState(key, updates) {
   if (!dev[key]) {
     console.warn(`Ключ ${key} отсутствует в dev.`);
     return;
   }
   Object.assign(dev[key], updates); // Обновляем состояние
+  saveDevToFile(dev); // Сохраняем новое состояние
 }
 
 module.exports = {
   dev,
-  saveDevToFile,
   updateDevState,
+  saveDevToFile,
 };
