@@ -41,7 +41,8 @@ function loadDevFromFile() {
 const dev = {};
 const savedState = loadDevFromFile();
 
-if (savedState) {
+// Дополнительная проверка на пустой объект
+if (savedState && Object.keys(savedState).length > 0) {
   console.log('Состояние dev загружено из файла.');
   Object.assign(dev, savedState);
 } else {
