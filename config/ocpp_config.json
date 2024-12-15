@@ -1,7 +1,7 @@
 {
   "centralSystemUrl": "wss://ws.ocpp-css.com/ocpp/33dbf87ebb682fcb8aceb7423af74539ef1575d7/avade1",
   "protocol": "OCPP 1.6 JSON",
-  "identity": "avade",
+  "identity": "avade1",
   "stationName": "avade1",
   "vendor": "Electricus",
   "model": "Frankenstein",
