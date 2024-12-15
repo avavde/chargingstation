@@ -4,28 +4,9 @@ const logger = require('../utils/logger');
 const config = require('../config');
 
 const modbusClient = new ModbusRTU();
-const modbusMutex = new Mutex(); // Создаем мьютекс
+const modbusMutex = new Mutex();
+const modbusDataCache = {}; // Глобальный кэш данных Modbus
 
-// Таймаут для чтения регистров
-async function readWithTimeout(register, length = 2, timeout = 2000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error('Modbus таймаут'));
-    }, timeout);
-
-    modbusClient.readInputRegisters(register, length)
-      .then((data) => {
-        clearTimeout(timer);
-        resolve(data);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(new Error(`Ошибка Modbus: ${error.message}`));
-      });
-  });
-}
-
-// Инициализация Modbus клиента
 async function initializeModbusClient() {
   try {
     logger.info('Инициализация Modbus-клиента...');
@@ -42,32 +23,31 @@ async function initializeModbusClient() {
   }
 }
 
-// Чтение накопленной энергии и мощности с мьютексом
-async function readEnergyAndPower(connector) {
-  return await modbusMutex.runExclusive(async () => { // Используем мьютекс
+async function pollAndCacheConnectorData(connector) {
+  return await modbusMutex.runExclusive(async () => {
     try {
       modbusClient.setID(connector.meterAddress);
+      const energyData = await modbusClient.readInputRegisters(connector.energyRegister, 2);
+      const powerData = await modbusClient.readInputRegisters(connector.powerRegister, 2);
 
-      // Чтение накопленной энергии
-      const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
-      const energyRaw = energyData.buffer.readInt32BE(0);
-      const energy = Math.abs(energyRaw) / connector.energyScale;
+      const energy = Math.abs(energyData.buffer.readInt32BE(0)) / connector.energyScale;
+      const power = Math.abs(powerData.buffer.readInt32BE(0)) / connector.powerScale;
 
-      // Чтение мгновенной мощности
-      const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
-      const powerRaw = powerData.buffer.readInt32BE(0);
-      const power = Math.abs(powerRaw) / connector.powerScale;
-
-      logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
-      return { energy, power };
+      modbusDataCache[connector.id] = { energy, power, timestamp: Date.now() };
+      logger.debug(`Modbus данные обновлены для коннектора ${connector.id}: ${energy} kWh, ${power} kW`);
     } catch (error) {
-      throw new Error(`Ошибка Modbus чтения: ${error.message}`);
+      logger.error(`Ошибка Modbus при опросе коннектора ${connector.id}: ${error.message}`);
     }
   });
 }
 
+function getCachedModbusData(connectorId) {
+  return modbusDataCache[connectorId] || { energy: 0, power: 0 };
+}
+
 module.exports = {
   modbusClient,
-  readEnergyAndPower,
   initializeModbusClient,
+  pollAndCacheConnectorData,
+  getCachedModbusData,
 };
