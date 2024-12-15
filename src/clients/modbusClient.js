@@ -68,4 +68,6 @@ async function readEnergyAndPower(connector) {
 
 module.exports = {
   modbusClient,
-  initializeMod
+  readEnergyAndPower,
+  initializeModbusClient,
+};
