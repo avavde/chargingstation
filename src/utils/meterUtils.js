@@ -1,3 +1,5 @@
+
+const logger = require('./logger');
 const { pollAndCacheConnectorData, getCachedModbusData } = require('../clients/modbusClient');
 
 async function updateModbusData(client) {
