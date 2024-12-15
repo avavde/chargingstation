@@ -1,9 +1,10 @@
 {
-  "centralSystemUrl": "wss://hub.volttime.com",
-  "stationName": "0011000",
+  "centralSystemUrl": "wss://proxy.volttime.com/v1/",
+  "protocol": "OCPP 1.6 JSON",
+  "stationName": "avade",
   "vendor": "Electricus",
   "model": "Frankenstein",
-  "pinCode": "8467",
+  "pinCode": "8431",
   "connectors": [
     {
       "id": 1,

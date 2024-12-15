@@ -14,10 +14,10 @@ async function pollConnectorData(client, connector) {
   try {
     logger.debug(`Опрос данных для коннектора ${connector.id}...`);
 
-    // Чтение данных Modbus
+    // Чтение данных Modbus с использованием мьютекса
     const { energy, power } = await readEnergyAndPower(connector);
 
-    // Обновление состояния
+    // Обновляем данные состояния
     dev[connectorKey].Energy = energy;
     dev[connectorKey].Power = power;
 
@@ -27,19 +27,12 @@ async function pollConnectorData(client, connector) {
     if (dev[connectorKey].transactionId) {
       await sendMeterValues(client, connector.id, dev[connectorKey].transactionId, energy, power);
     }
-
-    // Проверка статуса и отправка StatusNotification
-    if (dev[connectorKey].status === 'Unavailable') {
-      dev[connectorKey].status = 'Available';
-      await sendStatusNotification(client, connector.id, 'Available', 'NoError');
-    }
   } catch (error) {
     logger.error(`Ошибка при опросе коннектора ${connector.id}: ${error.message}`);
     dev[connectorKey].status = 'Unavailable';
     await sendStatusNotification(client, connector.id, 'Unavailable', 'NoError');
   }
 }
-
 /**
  * Циклический опрос данных Modbus
  * @param {Object} client - OCPP клиент

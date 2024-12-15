@@ -1,8 +1,10 @@
 const ModbusRTU = require('modbus-serial');
+const AsyncLock = require('async-lock');
 const logger = require('../utils/logger');
 const config = require('../config');
 
 const modbusClient = new ModbusRTU();
+const lock = new AsyncLock(); // Создаем мьютекс для защиты доступа к Modbus
 
 // Таймаут для чтения регистров
 async function readWithTimeout(register, length = 2, timeout = 2000) {
@@ -40,26 +42,28 @@ async function initializeModbusClient() {
   }
 }
 
-// Чтение накопленной энергии и мощности
+// Чтение накопленной энергии и мощности через мьютекс
 async function readEnergyAndPower(connector) {
-  try {
-    modbusClient.setID(connector.meterAddress);
+  return lock.acquire('modbus', async () => { // Используем мьютекс для защиты доступа
+    try {
+      modbusClient.setID(connector.meterAddress);
 
-    // Чтение накопленной энергии
-    const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
-    const energyRaw = energyData.buffer.readInt32BE(0);
-    const energy = Math.abs(energyRaw) / connector.energyScale; // Применяем коэффициент и модуль
+      // Чтение накопленной энергии
+      const energyData = await readWithTimeout(connector.energyRegister, 2, 2000);
+      const energyRaw = energyData.buffer.readInt32BE(0);
+      const energy = Math.abs(energyRaw) / connector.energyScale;
 
-    // Чтение мгновенной мощности
-    const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
-    const powerRaw = powerData.buffer.readInt32BE(0);
-    const power = Math.abs(powerRaw) / connector.powerScale; // Применяем коэффициент и модуль
+      // Чтение мгновенной мощности
+      const powerData = await readWithTimeout(connector.powerRegister, 2, 2000);
+      const powerRaw = powerData.buffer.readInt32BE(0);
+      const power = Math.abs(powerRaw) / connector.powerScale;
 
-    logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
-    return { energy, power };
-  } catch (error) {
-    throw new Error(`Ошибка Modbus чтения: ${error.message}`);
-  }
+      logger.debug(`Modbus данные (Коннектор ${connector.id}): Энергия=${energy} kWh, Мощность=${power} kW`);
+      return { energy, power };
+    } catch (error) {
+      throw new Error(`Ошибка Modbus чтения: ${error.message}`);
+    }
+  });
 }
 
 module.exports = {
