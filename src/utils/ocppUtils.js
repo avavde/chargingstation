@@ -1,6 +1,6 @@
 // utils/ocppUtils.js
 const logger = require('./logger');
-const dev = require('../dev');
+const { dev, saveDevToFile } = require('../data/dev');
 const config = require('../config');
 const { readWithTimeout } = require('../clients/modbusClient'); // Импортируем необходимые функции
 const { modbusClient } = require('../clients/modbusClient'); // Импортируем modbusClient, если требуется
@@ -62,6 +62,7 @@ async function sendStatusNotification(client, connectorId, status, errorCode) {
   }
 }
 
+
 async function sendHeartbeat(client) {
   if (!client) {
     logger.warn('Попытка отправить Heartbeat без клиента.');
@@ -71,10 +72,12 @@ async function sendHeartbeat(client) {
   try {
     const response = await client.call('Heartbeat', {});
     logger.info('Heartbeat отправлен.');
+    saveDevToFile(dev); // Сохраняем состояние dev при успешном отправлении Heartbeat
   } catch (error) {
     logger.error(`Ошибка при отправке Heartbeat: ${error.message}`);
   }
 }
+
 
 async function sendFirmwareStatusNotification(client, status) {
   if (!client) {
