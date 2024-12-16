@@ -64,7 +64,9 @@ function logMessage(message, type) {
     }
 
     const modemInfo = await getModemInfo();
-    logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
+    logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);\
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Инициализация OCPP-клиента
     await initializeOCPPClient();
