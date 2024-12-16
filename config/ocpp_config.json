@@ -1,5 +1,5 @@
 {
-  "centralSystemUrl": "ws://ocpp.rskseti.app",
+  "centralSystemUrl": "ws://ocpp.rskseti.app/",
   "protocol": "OCPP 1.6 JSON",
   "identity": "CP0001",
   "stationName": "CP0001",
