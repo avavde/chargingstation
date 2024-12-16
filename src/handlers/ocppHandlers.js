@@ -287,33 +287,55 @@ client.handle('RemoteStopTransaction', async (payload) => {
 
   client.handle('ReserveNow', async (payload) => {
     logger.info(`ReserveNow получен: ${JSON.stringify(payload)}`);
-
+  
     const { connectorId, expiryDate, idTag, reservationId } = payload;
+  
+    // Проверка наличия всех необходимых полей
+    if (!connectorId || !expiryDate || !idTag || !reservationId) {
+      logger.error('Некорректные параметры в ReserveNow запросе.');
+      return { status: 'Rejected' };
+    }
+  
+    // Поиск разъёма
     const connector = config.connectors.find((c) => c.id === connectorId);
-
     if (!connector) {
       logger.error(`Разъем с ID ${connectorId} не найден.`);
       return { status: 'Rejected' };
     }
-
+  
     const connectorKey = `${config.stationName}_connector${connectorId}`;
+    
+    // Проверка инициализации разъёма
+    if (!dev[connectorKey]) {
+      logger.error(`Статус разъёма ${connectorId} не инициализирован.`);
+      return { status: 'Rejected' };
+    }
+  
+    logger.info(`Текущий статус разъёма ${connectorId}: ${dev[connectorKey].status}`);
+  
+    // Проверка доступности разъёма
     if (dev[connectorKey].status !== 'Available') {
-      logger.error(`Разъем ${connectorId} недоступен для бронирования.`);
+      logger.error(`Разъем ${connectorId} недоступен для бронирования. Текущий статус: ${dev[connectorKey].status}`);
       return { status: 'Occupied' };
     }
-
+  
+    // Добавление резервации
     addReservation(reservationId, {
       connectorId,
       expiryDate: new Date(expiryDate),
       idTag,
       stationName: config.stationName,
     });
-
+  
+    // Обновление статуса разъёма
     dev[connectorKey].status = 'Reserved';
     await sendStatusNotification(client, connectorId, 'Reserved', 'NoError');
-
+  
+    logger.info(`Резервация ${reservationId} успешно обработана для разъёма ${connectorId}.`);
+  
     return { status: 'Accepted' };
   });
+  
 
   client.handle('CancelReservation', async (payload) => {
     logger.info(`CancelReservation получен: ${JSON.stringify(payload)}`);
