@@ -25,5 +25,6 @@
   "modbusDataBits": 8,              
   "modbusStopBits": 2,             
   "pricePerKwh": 5.0,
-  "modemPort": "/dev/ttyUSB0"
-}
+  "modemPort": "/dev/ttyUSB0",
+  "heartbeatInterval": 1000
+} 

@@ -37,11 +37,15 @@ async function initializeOCPPClient() {
           await sendInitialStatusNotifications(client);
           logger.info('StatusNotification успешно отправлены.');
 
-          // Периодическая отправка Heartbeat
+          // Периодическая отправка Heartbeat с использованием конфигурации
+          const heartbeatInterval = config.heartbeatInterval || 60000; // Используем значение из конфигурации или по умолчанию 60000 мс
+
           setInterval(() => {
             logger.info('Отправка Heartbeat...');
             sendHeartbeat(client);
-          }, 60000);
+          }, heartbeatInterval);
+
+          logger.info(`Heartbeat будет отправляться каждые ${heartbeatInterval / 1000} секунд.`);
 
           resolve();
         } catch (error) {
