@@ -31,9 +31,19 @@ if (!fs.existsSync(localAuthListPath)) {
 
 let localAuthList = JSON.parse(fs.readFileSync(localAuthListPath, 'utf-8'));
 
+function wrapHandler(handler) {
+  return async (payload, ...args) => {
+    // Проверка на наличие params и распаковка
+    const realPayload = payload.params || payload;
+
+    // Передаем распакованные данные в исходный хэндлер
+    return handler(realPayload, ...args);
+  };
+}
+
 function setupOCPPHandlers(client) {
   // Обработчик Authorize
-  client.handle('Authorize', async (payload) => {
+  client.handle('Authorize', wrapHandler(async (payload) => {
     logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
     const { idTag } = payload;
 
@@ -41,12 +51,8 @@ function setupOCPPHandlers(client) {
       (item) => item.idTag === idTag && item.idTagInfo.status === 'Accepted'
     );
 
-    if (isAuthorized) {
-      return { idTagInfo: { status: 'Accepted' } };
-    } else {
-      return { idTagInfo: { status: 'Invalid' } };
-    }
-  });
+    return { idTagInfo: { status: isAuthorized ? 'Accepted' : 'Invalid' } };
+  }));
 
  
 
