@@ -288,15 +288,19 @@ client.handle('RemoteStopTransaction', async (payload) => {
   client.handle('ReserveNow', async (payload) => {
     logger.info(`ReserveNow получен: ${JSON.stringify(payload)}`);
   
-    const { connectorId, expiryDate, idTag, reservationId } = payload;
+    // Извлекаем параметры из payload или payload.params
+    const { connectorId, expiryDate, idTag, reservationId } = payload.params || payload;
+  
+    // Логируем для отладки
+    logger.debug(`connectorId: ${connectorId}, expiryDate: ${expiryDate}, idTag: ${idTag}, reservationId: ${reservationId}`);
   
     // Проверка наличия всех необходимых полей
     if (!connectorId || !expiryDate || !idTag || !reservationId) {
-      logger.error('Некорректные параметры в ReserveNow запросе.');
+      logger.error(`Некорректные параметры в ReserveNow запросе: connectorId=${connectorId}, expiryDate=${expiryDate}, idTag=${idTag}, reservationId=${reservationId}`);
       return { status: 'Rejected' };
     }
   
-    // Поиск разъёма
+    // Поиск разъема
     const connector = config.connectors.find((c) => c.id === connectorId);
     if (!connector) {
       logger.error(`Разъем с ID ${connectorId} не найден.`);
@@ -304,16 +308,15 @@ client.handle('RemoteStopTransaction', async (payload) => {
     }
   
     const connectorKey = `${config.stationName}_connector${connectorId}`;
-    
-    // Проверка инициализации разъёма
+  
     if (!dev[connectorKey]) {
-      logger.error(`Статус разъёма ${connectorId} не инициализирован.`);
+      logger.error(`Статус разъема ${connectorId} не инициализирован.`);
       return { status: 'Rejected' };
     }
   
-    logger.info(`Текущий статус разъёма ${connectorId}: ${dev[connectorKey].status}`);
+    logger.info(`Текущий статус разъема ${connectorId}: ${dev[connectorKey].status}`);
   
-    // Проверка доступности разъёма
+    // Проверка доступности разъема
     if (dev[connectorKey].status !== 'Available') {
       logger.error(`Разъем ${connectorId} недоступен для бронирования. Текущий статус: ${dev[connectorKey].status}`);
       return { status: 'Occupied' };
@@ -327,14 +330,15 @@ client.handle('RemoteStopTransaction', async (payload) => {
       stationName: config.stationName,
     });
   
-    // Обновление статуса разъёма
+    // Обновление статуса разъема
     dev[connectorKey].status = 'Reserved';
     await sendStatusNotification(client, connectorId, 'Reserved', 'NoError');
   
-    logger.info(`Резервация ${reservationId} успешно обработана для разъёма ${connectorId}.`);
+    logger.info(`Резервация ${reservationId} успешно обработана для разъема ${connectorId}.`);
   
     return { status: 'Accepted' };
   });
+  
   
 
   client.handle('CancelReservation', async (payload) => {
