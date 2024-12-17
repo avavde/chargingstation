@@ -58,7 +58,7 @@ function setupOCPPHandlers(client) {
 
 
   // DataTransfer
-  client.handle('DataTransfer', async (payload) => {
+  client.handle('DataTransfer', wrapHandler(async (payload)  => {
     logger.info(`DataTransfer получен: ${JSON.stringify(payload)}`);
 
     const { vendorId, messageId, data } = payload;
@@ -76,7 +76,7 @@ function setupOCPPHandlers(client) {
   });
 
 // RemoteStartTransaction
-client.handle('RemoteStartTransaction', async (payload) => {
+client.handle('RemoteStartTransaction', wrapHandler(async (payload)  => {
   logger.info(`RemoteStartTransaction получен: ${JSON.stringify(payload)}`);
 
   try {
@@ -125,7 +125,7 @@ if (!connectorExists) {
 
 
 // RemoteStopTransaction
-client.handle('RemoteStopTransaction', async (payload) => {
+client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
   logger.info(`RemoteStopTransaction получен: ${JSON.stringify(payload)}`);
 
   try {
@@ -174,7 +174,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
 
 
  
-  client.handle('ChangeAvailability', async (payload) => {
+  client.handle('ChangeAvailability', wrapHandler(async (payload)  => {
     logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
 
     const { connectorId, type } = payload;
@@ -210,7 +210,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status };
   });
 
-  client.handle('ChangeConfiguration', async (payload) => {
+  client.handle('ChangeConfiguration', wrapHandler(async (payload)  => {
     logger.info(`ChangeConfiguration получен: ${JSON.stringify(payload)}`);
   
     const { key, value } = payload;
@@ -259,7 +259,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status };
   });
 
-  client.handle('GetConfiguration', async (payload) => {
+  client.handle('GetConfiguration', wrapHandler(async (payload)  => {
     logger.info(`GetConfiguration получен: ${JSON.stringify(payload)}`);
 
     const { key } = payload;
@@ -291,7 +291,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { configurationKey, unknownKey };
   });
 
-  client.handle('ReserveNow', async (payload) => {
+  client.handle('ReserveNow', wrapHandler(async (payload)  => {
     logger.info(`ReserveNow получен: ${JSON.stringify(payload)}`);
   
     // Извлекаем параметры из payload или payload.params
@@ -347,7 +347,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
   
   
 
-  client.handle('CancelReservation', async (payload) => {
+  client.handle('CancelReservation', wrapHandler(async (payload)  => {
     logger.info(`CancelReservation получен: ${JSON.stringify(payload)}`);
 
     const { reservationId } = payload;
@@ -367,7 +367,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     }
   });
 
-  client.handle('UpdateFirmware', async (payload) => {
+  client.handle('UpdateFirmware', wrapHandler(async (payload)  => {
     logger.info(`UpdateFirmware получен: ${JSON.stringify(payload)}`);
 
     const { location, retrieveDate } = payload;
@@ -427,7 +427,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return {};
   });
 
-  client.handle('GetDiagnostics', async (payload) => {
+  client.handle('GetDiagnostics', wrapHandler(async (payload)  => {
     logger.info(`GetDiagnostics получен: ${JSON.stringify(payload)}`);
 
     const { location } = payload;
@@ -475,7 +475,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { fileName: path.basename(diagnosticsFilePath) };
   });
 
-  client.handle('Reset', async (payload) => {
+  client.handle('Reset', wrapHandler(async (payload)  => {
     logger.info(`Reset получен: ${JSON.stringify(payload)}`);
 
     const { type } = payload;
@@ -506,7 +506,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status };
   });
 
-  client.handle('UnlockConnector', async (payload) => {
+  client.handle('UnlockConnector', wrapHandler(async (payload)  => {
     logger.info(`UnlockConnector получен: ${JSON.stringify(payload)}`);
 
     const { connectorId } = payload;
@@ -522,7 +522,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status: 'Unlocked' };
   });
 
-  client.handle('ClearCache', async (payload) => {
+  client.handle('ClearCache', wrapHandler(async (payload)  => {
     logger.info(`ClearCache получен: ${JSON.stringify(payload)}`);
 
     localAuthList = { listVersion: 0, idTagList: [] };
@@ -533,7 +533,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status: 'Accepted' };
   });
 
-  client.handle('TriggerMessage', async (payload) => {
+  client.handle('TriggerMessage', wrapHandler(async (payload)  => {
     logger.info(`TriggerMessage получен: ${JSON.stringify(payload)}`);
   
     const { requestedMessage, connectorId } = payload;
@@ -580,7 +580,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
   });
   
 
-  client.handle('SetChargingProfile', async (payload) => {
+  client.handle('SetChargingProfile', wrapHandler(async (payload)  => {
     logger.info(`SetChargingProfile получен: ${JSON.stringify(payload)}`);
 
     const { connectorId, csChargingProfiles } = payload;
@@ -591,13 +591,13 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status };
   });
 
-  client.handle('GetCompositeSchedule', async (payload) => {
+  client.handle('GetCompositeSchedule', wrapHandler(async (payload)  => {
     logger.info(`GetCompositeSchedule получен: ${JSON.stringify(payload)}`);
 
     return { status: 'Rejected' };
   });
 
-  client.handle('SendLocalList', async (payload) => {
+  client.handle('SendLocalList', wrapHandler(async (payload)  => {
     logger.info(`SendLocalList получен: ${JSON.stringify(payload)}`);
 
     const { listVersion, localAuthorizationList, updateType } = payload;
@@ -622,7 +622,7 @@ client.handle('RemoteStopTransaction', async (payload) => {
     return { status: 'Accepted' };
   });
 
-  client.handle('GetLocalListVersion', async (payload) => {
+  client.handle('GetLocalListVersion', wrapHandler(async (payload)  => {
     logger.info(`GetLocalListVersion получен: ${JSON.stringify(payload)}`);
     return { listVersion: localAuthList.listVersion };
   });

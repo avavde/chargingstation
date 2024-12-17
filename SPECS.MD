@@ -14,7 +14,7 @@ Heartbeat
 
 Authorize
 
-Обработчик: client.handle("Authorize", async (payload) => { ... })
+Обработчик: client.handle("Authorize", wrapHandler(async (payload)  => { ... })
 Описание: Проверяет RFID-карту или другую идентификацию для авторизации пользователя на зарядку.
 
 StartTransaction
@@ -39,7 +39,7 @@ MeterValues
 
 DataTransfer
 
-Обработчик: client.handle("DataTransfer", async (payload) => { ... })
+Обработчик: client.handle("DataTransfer", wrapHandler(async (payload)  => { ... })
 Описание: Позволяет обмениваться пользовательскими данными между зарядной станцией и центральной системой.
 Обработчики удаленного управления (Remote Control Handlers)
 
@@ -47,36 +47,36 @@ DataTransfer
 
 RemoteStartTransaction
 
-Обработчик: client.handle("RemoteStartTransaction", async (payload) => { ... })
+Обработчик: client.handle("RemoteStartTransaction", wrapHandler(async (payload)  => { ... })
 Описание: Инициирует сессию зарядки удаленно.
 
 RemoteStopTransaction
 
-Обработчик: client.handle("RemoteStopTransaction", async (payload) => { ... })
+Обработчик: client.handle("RemoteStopTransaction", wrapHandler(async (payload)  => { ... })
 Описание: Останавливает текущую сессию зарядки удаленно.
 
 ChangeAvailability
 
-Обработчик: client.handle("ChangeAvailability", async (payload) => { ... })
+Обработчик: client.handle("ChangeAvailability", wrapHandler(async (payload)  => { ... })
 Описание: Изменяет операционный статус зарядной станции или конкретного коннектора (например, на Inoperative или Operative).
 
 ChangeConfiguration
 
-Обработчик: client.handle("ChangeConfiguration", async (payload) => { ... })
+Обработчик: client.handle("ChangeConfiguration", wrapHandler(async (payload)  => { ... })
 Описание: Изменяет параметры конфигурации зарядной станции.
 GetConfiguration
 
-Обработчик: client.handle("GetConfiguration", async (payload) => { ... })
+Обработчик: client.handle("GetConfiguration", wrapHandler(async (payload)  => { ... })
 Описание: Получает параметры конфигурации от зарядной станции.
 
 UnlockConnector
 
-Обработчик: client.handle("UnlockConnector", async (payload) => { ... })
+Обработчик: client.handle("UnlockConnector", wrapHandler(async (payload)  => { ... })
 Описание: Разблокирует коннектор, обычно используется, когда кабель застрял.
 
 Reset
 
-Обработчик: client.handle("Reset", async (payload) => { ... })
+Обработчик: client.handle("Reset", wrapHandler(async (payload)  => { ... })
 Описание: Перезагружает зарядную станцию (либо Soft, либо Hard reset).
 Обработчики бронирования (Reservation Handlers)
 
@@ -84,12 +84,12 @@ Reset
 
 ReserveNow
 
-Обработчик: client.handle("ReserveNow", async (payload) => { ... })
+Обработчик: client.handle("ReserveNow", wrapHandler(async (payload)  => { ... })
 Описание: Бронирование коннектора для конкретного пользователя и времени.
 
 CancelReservation
 
-Обработчик: client.handle("CancelReservation", async (payload) => { ... })
+Обработчик: client.handle("CancelReservation", wrapHandler(async (payload)  => { ... })
 Описание: Отменяет существующее бронирование.
 Обработчики диагностики и управления прошивкой (Diagnostics and Firmware Management Handlers)
 
@@ -97,7 +97,7 @@ CancelReservation
 
 GetDiagnostics
 
-Обработчик: client.handle("GetDiagnostics", async (payload) => { ... })
+Обработчик: client.handle("GetDiagnostics", wrapHandler(async (payload)  => { ... })
 Описание: Запрашивает у зарядной станции загрузить диагностическую информацию.
 
 DiagnosticsStatusNotification
@@ -107,7 +107,7 @@ DiagnosticsStatusNotification
 
 UpdateFirmware
 
-Обработчик: client.handle("UpdateFirmware", async (payload) => { ... })
+Обработчик: client.handle("UpdateFirmware", wrapHandler(async (payload)  => { ... })
 Описание: Инициирует процесс обновления прошивки.
 FirmwareStatusNotification
 
@@ -117,12 +117,12 @@ FirmwareStatusNotification
 
 GetLocalListVersion
 
-Обработчик: client.handle("GetLocalListVersion", async (payload) => { ... })
+Обработчик: client.handle("GetLocalListVersion", wrapHandler(async (payload)  => { ... })
 Описание: Получает номер версии локального списка авторизации.
 
 SendLocalList
 
-Обработчик: client.handle("SendLocalList", async (payload) => { ... })
+Обработчик: client.handle("SendLocalList", wrapHandler(async (payload)  => { ... })
 Описание: Обновляет локальный список авторизации.
 Вспомогательные функции (Auxiliary Functions)
 
@@ -234,22 +234,22 @@ client.on("message")
 
 ClearCache
 
-Обработчик: client.handle("ClearCache", async (payload) => { ... })
+Обработчик: client.handle("ClearCache", wrapHandler(async (payload)  => { ... })
 Описание: Очищает локальный кэш авторизации.
 
 GetCompositeSchedule
 
-Обработчик: client.handle("GetCompositeSchedule", async (payload) => { ... })
+Обработчик: client.handle("GetCompositeSchedule", wrapHandler(async (payload)  => { ... })
 Описание: Предоставляет графики зарядки на основе запрошенных параметров.
 
 SetChargingProfile
 
-Обработчик: client.handle("SetChargingProfile", async (payload) => { ... })
+Обработчик: client.handle("SetChargingProfile", wrapHandler(async (payload)  => { ... })
 Описание: Устанавливает профиль зарядки для коннектора для контроля скоростей зарядки.
 
 TriggerMessage
 
-Обработчик: client.handle("TriggerMessage", async (payload) => { ... })
+Обработчик: client.handle("TriggerMessage", wrapHandler(async (payload)  => { ... })
 Описание: Запрашивает у зарядной станции отправить определенный тип сообщения в центральную систему.
 
 DiagnosticsStatusNotification
