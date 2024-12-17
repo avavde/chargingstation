@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const config = require('../config/ocpp_config.json'); // Подключаем конфигурацию
+const config = require('../config'); // Подключаем конфигурацию
 
 const dataDir = path.join(__dirname, '../data');
 const devFilePath = path.join(dataDir, 'dev_state.json');
