@@ -1,0 +1,12 @@
+{
+  "CP0001_connector1": {
+    "status": "Available",
+    "availability": "Operative",
+    "transactionId": null,
+    "idTag": null,
+    "Energy": 0,
+    "Power": 0,
+    "Summ": 0,
+    "meterSerialNumber": null
+  }
+}

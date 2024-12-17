@@ -30,30 +30,42 @@ if (!fs.existsSync(localAuthListPath)) {
 }
 
 let localAuthList = JSON.parse(fs.readFileSync(localAuthListPath, 'utf-8'));
-
 function wrapHandler(handler) {
   return async (payload, ...args) => {
-    // Проверка на наличие params и распаковка
     const realPayload = payload.params || payload;
-
-    // Передаем распакованные данные в исходный хэндлер
     return handler(realPayload, ...args);
   };
 }
 
 function setupOCPPHandlers(client) {
-  // Обработчик Authorize
-  client.handle('Authorize', wrapHandler(async (payload) => {
-    logger.info(`Authorize получен: ${JSON.stringify(payload)}`);
-    const { idTag } = payload;
+  // ChangeAvailability
+  client.handle('ChangeAvailability', wrapHandler(async (payload) => {
+    logger.info(`ChangeAvailability получен: ${JSON.stringify(payload)}`);
+    const { connectorId, type } = payload;
 
-    const isAuthorized = localAuthList.idTagList.some(
-      (item) => item.idTag === idTag && item.idTagInfo.status === 'Accepted'
-    );
+    if (connectorId === 0) {
+      config.connectors.forEach(async (connector) => {
+        const connectorKey = `${config.stationName}_connector${connector.id}`;
+        dev[connectorKey].availability = type;
+        const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
+        dev[connectorKey].status = newStatus;
+        await sendStatusNotification(client, connector.id, newStatus, 'NoError');
+      });
+    } else {
+      const connector = config.connectors.find((c) => c.id === connectorId);
+      if (!connector) {
+        logger.error(`Разъем ${connectorId} не найден.`);
+        return { status: 'Rejected' };
+      }
+      const connectorKey = `${config.stationName}_connector${connector.id}`;
+      dev[connectorKey].availability = type;
+      const newStatus = type === 'Operative' ? 'Available' : 'Unavailable';
+      dev[connectorKey].status = newStatus;
+      await sendStatusNotification(client, connectorId, newStatus, 'NoError');
+    }
 
-    return { idTagInfo: { status: isAuthorized ? 'Accepted' : 'Invalid' } };
+    return { status: 'Accepted' };
   }));
-
  
 
 
@@ -73,7 +85,7 @@ function setupOCPPHandlers(client) {
     }
 
     return { status: 'Accepted', data: 'Data processed' };
-  });
+  }));
 
 // RemoteStartTransaction
 client.handle('RemoteStartTransaction', wrapHandler(async (payload)  => {
@@ -121,7 +133,7 @@ if (!connectorExists) {
     logger.error(`Ошибка RemoteStartTransaction: ${error.message}`);
     return { status: 'Rejected' };
   }
-});
+}));
 
 
 // RemoteStopTransaction
@@ -170,7 +182,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     logger.error(`Ошибка RemoteStopTransaction: ${error.message}`);
     return { status: 'Rejected' };
   }
-});
+}));
 
 
  
@@ -208,7 +220,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }
 
     return { status };
-  });
+  }));
 
   client.handle('ChangeConfiguration', wrapHandler(async (payload)  => {
     logger.info(`ChangeConfiguration получен: ${JSON.stringify(payload)}`);
@@ -257,7 +269,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }
   
     return { status };
-  });
+  }));
 
   client.handle('GetConfiguration', wrapHandler(async (payload)  => {
     logger.info(`GetConfiguration получен: ${JSON.stringify(payload)}`);
@@ -289,83 +301,63 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }
 
     return { configurationKey, unknownKey };
-  });
+  }));
 
-  client.handle('ReserveNow', wrapHandler(async (payload)  => {
+  // ReserveNow
+  client.handle('ReserveNow', wrapHandler(async (payload) => {
     logger.info(`ReserveNow получен: ${JSON.stringify(payload)}`);
-  
-    // Извлекаем параметры из payload или payload.params
-    const { connectorId, expiryDate, idTag, reservationId } = payload.params || payload;
-  
-    // Логируем для отладки
-    logger.debug(`connectorId: ${connectorId}, expiryDate: ${expiryDate}, idTag: ${idTag}, reservationId: ${reservationId}`);
-  
-    // Проверка наличия всех необходимых полей
+    const { connectorId, expiryDate, idTag, reservationId } = payload;
+
     if (!connectorId || !expiryDate || !idTag || !reservationId) {
-      logger.error(`Некорректные параметры в ReserveNow запросе: connectorId=${connectorId}, expiryDate=${expiryDate}, idTag=${idTag}, reservationId=${reservationId}`);
+      logger.error('Некорректные параметры в ReserveNow запросе.');
       return { status: 'Rejected' };
     }
-  
-    // Поиск разъема
-    const connector = config.connectors.find((c) => c.id === connectorId);
-    if (!connector) {
-      logger.error(`Разъем с ID ${connectorId} не найден.`);
-      return { status: 'Rejected' };
-    }
-  
+
     const connectorKey = `${config.stationName}_connector${connectorId}`;
-  
     if (!dev[connectorKey]) {
-      logger.error(`Статус разъема ${connectorId} не инициализирован.`);
+      logger.error(`Коннектор ${connectorId} не найден.`);
       return { status: 'Rejected' };
     }
-  
-    logger.info(`Текущий статус разъема ${connectorId}: ${dev[connectorKey].status}`);
-  
-    // Проверка доступности разъема
-    if (dev[connectorKey].status !== 'Available') {
-      logger.error(`Разъем ${connectorId} недоступен для бронирования. Текущий статус: ${dev[connectorKey].status}`);
+
+    if (dev[connectorKey].status === 'Reserved' || dev[connectorKey].status === 'Occupied') {
+      logger.error(`Коннектор ${connectorId} уже занят или зарезервирован.`);
       return { status: 'Occupied' };
     }
-  
-    // Добавление резервации
+
     addReservation(reservationId, {
       connectorId,
       expiryDate: new Date(expiryDate),
       idTag,
       stationName: config.stationName,
     });
-  
-    // Обновление статуса разъема
+
     dev[connectorKey].status = 'Reserved';
     await sendStatusNotification(client, connectorId, 'Reserved', 'NoError');
-  
-    logger.info(`Резервация ${reservationId} успешно обработана для разъема ${connectorId}.`);
-  
+    logger.info(`Резервация ${reservationId} выполнена для коннектора ${connectorId}.`);
+
     return { status: 'Accepted' };
-  });
-  
-  
+  }));
 
-  client.handle('CancelReservation', wrapHandler(async (payload)  => {
+  // CancelReservation
+  client.handle('CancelReservation', wrapHandler(async (payload) => {
     logger.info(`CancelReservation получен: ${JSON.stringify(payload)}`);
-
     const { reservationId } = payload;
 
-    if (reservations[reservationId]) {
-      const connectorId = reservations[reservationId].connectorId;
-      removeReservation(reservationId);
-
-      const connectorKey = `${config.stationName}_connector${connectorId}`;
-      dev[connectorKey].status = 'Available';
-      await sendStatusNotification(client, connectorId, 'Available', 'NoError');
-
-      return { status: 'Accepted' };
-    } else {
-      logger.error(`Бронирование с ID ${reservationId} не найдено.`);
+    if (!reservations[reservationId]) {
+      logger.error(`Резервация ${reservationId} не найдена.`);
       return { status: 'Rejected' };
     }
-  });
+
+    const { connectorId } = reservations[reservationId];
+    const connectorKey = `${config.stationName}_connector${connectorId}`;
+
+    removeReservation(reservationId);
+    dev[connectorKey].status = 'Available';
+    await sendStatusNotification(client, connectorId, 'Available', 'NoError');
+    logger.info(`Резервация ${reservationId} отменена для коннектора ${connectorId}.`);
+
+    return { status: 'Accepted' };
+  }));
 
   client.handle('UpdateFirmware', wrapHandler(async (payload)  => {
     logger.info(`UpdateFirmware получен: ${JSON.stringify(payload)}`);
@@ -425,7 +417,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }
 
     return {};
-  });
+  }));
 
   client.handle('GetDiagnostics', wrapHandler(async (payload)  => {
     logger.info(`GetDiagnostics получен: ${JSON.stringify(payload)}`);
@@ -473,7 +465,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     uploadDiagnostics();
 
     return { fileName: path.basename(diagnosticsFilePath) };
-  });
+  }));
 
   client.handle('Reset', wrapHandler(async (payload)  => {
     logger.info(`Reset получен: ${JSON.stringify(payload)}`);
@@ -504,7 +496,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }, 1000);
 
     return { status };
-  });
+  }));
 
   client.handle('UnlockConnector', wrapHandler(async (payload)  => {
     logger.info(`UnlockConnector получен: ${JSON.stringify(payload)}`);
@@ -520,7 +512,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     logger.info(`Коннектор ${connectorId} успешно разблокирован.`);
 
     return { status: 'Unlocked' };
-  });
+  }));
 
   client.handle('ClearCache', wrapHandler(async (payload)  => {
     logger.info(`ClearCache получен: ${JSON.stringify(payload)}`);
@@ -531,7 +523,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     logger.info('Локальный кэш авторизации успешно очищен.');
 
     return { status: 'Accepted' };
-  });
+  }));
 
   client.handle('TriggerMessage', wrapHandler(async (payload)  => {
     logger.info(`TriggerMessage получен: ${JSON.stringify(payload)}`);
@@ -577,7 +569,7 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     }
   
     return { status };
-  });
+  }));
   
 
   client.handle('SetChargingProfile', wrapHandler(async (payload)  => {
@@ -589,13 +581,13 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     logger.info(`Профиль зарядки для коннектора ${connectorId} успешно применен.`);
 
     return { status };
-  });
+  }));
 
   client.handle('GetCompositeSchedule', wrapHandler(async (payload)  => {
     logger.info(`GetCompositeSchedule получен: ${JSON.stringify(payload)}`);
 
     return { status: 'Rejected' };
-  });
+  }));
 
   client.handle('SendLocalList', wrapHandler(async (payload)  => {
     logger.info(`SendLocalList получен: ${JSON.stringify(payload)}`);
@@ -620,12 +612,12 @@ client.handle('RemoteStopTransaction', wrapHandler(async (payload)  => {
     logger.info('Локальный список авторизации успешно обновлен.');
 
     return { status: 'Accepted' };
-  });
+}));
 
   client.handle('GetLocalListVersion', wrapHandler(async (payload)  => {
     logger.info(`GetLocalListVersion получен: ${JSON.stringify(payload)}`);
     return { listVersion: localAuthList.listVersion };
-  });
+  }));
 }
 
 module.exports = {
