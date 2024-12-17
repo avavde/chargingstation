@@ -11,9 +11,18 @@ if (!fs.existsSync(dataDir)) {
 }
 
 // Создание файла состояния dev, если он отсутствует
-if (!fs.existsSync(devFilePath)) {
-  fs.writeFileSync(devFilePath, '{}');
+function ensureDevFile() {
+  if (!fs.existsSync(devFilePath)) {
+    try {
+      fs.writeFileSync(devFilePath, '{}');
+      console.log('Файл состояния dev успешно создан.');
+    } catch (error) {
+      console.error(`Ошибка создания файла состояния dev: ${error.message}`);
+    }
+  }
 }
+
+ensureDevFile();
 
 // Функция для сохранения состояния dev в JSON файл
 function saveDevToFile(dev) {
@@ -27,22 +36,22 @@ function saveDevToFile(dev) {
 // Функция для загрузки состояния dev из JSON файла
 function loadDevFromFile() {
   try {
-    if (fs.existsSync(devFilePath)) {
-      const data = fs.readFileSync(devFilePath, 'utf-8');
-      return JSON.parse(data);
+    const data = fs.readFileSync(devFilePath, 'utf-8');
+    const parsedData = JSON.parse(data);
+    if (typeof parsedData === 'object') {
+      return parsedData;
     }
   } catch (error) {
     console.error(`Ошибка загрузки состояния dev: ${error.message}`);
   }
-  return null;
+  return {};
 }
 
 // Инициализация состояния dev
 const dev = {};
 const savedState = loadDevFromFile();
 
-// Дополнительная проверка на пустой объект
-if (savedState && Object.keys(savedState).length > 0) {
+if (Object.keys(savedState).length > 0) {
   console.log('Состояние dev загружено из файла.');
   Object.assign(dev, savedState);
 } else {
