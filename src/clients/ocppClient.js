@@ -4,6 +4,7 @@ const config = require('../config');
 const { getModemInfo } = require('../clients/modemClient');
 const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = require('../utils/ocppUtils');
 const { sendDataTransfer } = require('../utils/ocppUtils');
+const { exec } = require('child_process');
 
 let client;
 
@@ -46,7 +47,7 @@ async function initializeOCPPClient() {
       if (serverTime) {
         const systemTime = new Date(serverTime);
         logger.info(`Синхронизация времени: ${systemTime.toISOString()}`);
-        setSystemTime(systemTime); // Функция для установки системного времени
+        setSystemTime(systemTime); 
       } else {
         logger.warn('Сервер не вернул время в ответ на TimeSyncRequest.');
       }
@@ -83,6 +84,21 @@ async function initializeOCPPClient() {
       });
 
       // Обработчик всех входящих/исходящих сообщений (сырые данные - строка)
+      const { exec } = require('child_process');
+      const logger = require('../utils/logger');
+      
+      // Функция для установки системного времени
+      function setSystemTime(dateTime) {
+        const command = `date -s "${dateTime}"`;
+        exec(command, (error, stdout, stderr) => {
+          if (error) {
+            logger.error(`Ошибка установки системного времени: ${error.message}`);
+            return;
+          }
+          logger.info(`Системное время успешно установлено: ${dateTime}`);
+        });
+      }
+      
       client.on('message', (rawMsg) => {
         // rawMsg: { message: '["..."]', outbound: boolean }
         logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(rawMsg, null, 2)}`);
@@ -91,14 +107,14 @@ async function initializeOCPPClient() {
           if (typeof rawMessageStr !== 'string') {
             throw new Error('Отсутствует корректная строка для парсинга.');
           }
-
+      
           const parsedMessage = JSON.parse(rawMessageStr);
           if (!Array.isArray(parsedMessage)) {
             throw new Error('Входящее сообщение имеет неверный формат. Ожидался массив.');
           }
-
+      
           const [messageType, messageId, ...rest] = parsedMessage;
-
+      
           if (messageType === 2) {
             // OCPP Call (Request)
             const [action, payload = {}] = rest;
@@ -108,6 +124,13 @@ async function initializeOCPPClient() {
               method: action,
               payload
             }, null, 2)}`);
+      
+            // Проверка наличия времени в payload
+            if (payload.timestamp || payload.expiryDate) {
+              const timeToSet = payload.timestamp || payload.expiryDate;
+              logger.info(`Получено время для синхронизации: ${timeToSet}`);
+              setSystemTime(timeToSet);
+            }
           } else if (messageType === 3) {
             // OCPP CallResult (Response)
             const [payload = {}] = rest;
@@ -116,6 +139,13 @@ async function initializeOCPPClient() {
               messageId,
               payload
             }, null, 2)}`);
+      
+            // Проверка наличия времени в payload
+            if (payload.timestamp || payload.expiryDate) {
+              const timeToSet = payload.timestamp || payload.expiryDate;
+              logger.info(`Получено время для синхронизации: ${timeToSet}`);
+              setSystemTime(timeToSet);
+            }
           } else if (messageType === 4) {
             // OCPP CallError
             const [errorDetails] = rest;
@@ -132,6 +162,7 @@ async function initializeOCPPClient() {
           logger.error(`Содержимое сообщения: ${JSON.stringify(rawMsg, null, 2)}`);
         }
       });
+      
 
       // Обработчик входящих запросов (уже распарсенные данные в payload)
       client.on('request', (rawReq) => {
@@ -210,6 +241,20 @@ async function initializeOCPPClient() {
   });
 }
 
+/**
+ * Установка системного времени на основе полученной даты.
+ * @param {string} dateTime - Строка с датой и временем в формате ISO.
+ */
+function setSystemTime(dateTime) {
+  const command = `date -s "${dateTime}"`;
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      logger.error(`Ошибка установки системного времени: ${error.message}`);
+      return;
+    }
+    logger.info(`Системное время успешно установлено: ${dateTime}`);
+  });
+}
 
 
 /**
