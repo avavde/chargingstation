@@ -49,20 +49,10 @@ function handleRawMessage(rawData, type) {
       // OCPP Call (Request)
       const [action, payload = {}] = rest;
       logger.info(`Запрос: ${action}, Параметры: ${JSON.stringify(payload)}`);
-
-      if (payload?.currentTime || payload?.expiryDate) {
-        const timeToSet = payload.currentTime || payload.expiryDate;
-        setSystemTime(timeToSet);
-      }
     } else if (messageType === 3) {
       // OCPP CallResult (Response)
       const [payload = {}] = rest;
       logger.info(`Ответ: ${JSON.stringify(payload)}`);
-
-      if (payload?.currentTime || payload?.expiryDate) {
-        const timeToSet = payload.currentTime || payload.expiryDate;
-        setSystemTime(timeToSet);
-      }
     } else if (messageType === 4) {
       // OCPP CallError
       const [errorCode, errorDescription, details] = rest;
@@ -93,12 +83,13 @@ async function initializeOCPPClient() {
         logger.info('WebSocket-соединение установлено.');
 
         try {
+          // Получаем информацию о модеме и отправляем BootNotification
           const modemInfo = await getModemInfo();
           logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
-
           await sendBootNotification(client, modemInfo);
           logger.info('BootNotification успешно отправлен.');
 
+          // Запрос на синхронизацию времени при инициализации
           const timeSyncResponse = await sendDataTransfer(client, {
             vendorId: "YourVendorId",
             messageId: "TimeSyncRequest",
@@ -106,22 +97,30 @@ async function initializeOCPPClient() {
 
           if (timeSyncResponse?.data?.serverTime) {
             setSystemTime(timeSyncResponse.data.serverTime);
+          } else {
+            logger.warn('Сервер не вернул корректное время.');
           }
 
+          // Отправка начального статуса
           await sendInitialStatusNotifications(client);
           logger.info('StatusNotification успешно отправлены.');
 
+          // Запуск периодического отправления Heartbeat
           const heartbeatInterval = config.heartbeatInterval || 60000;
-          setInterval(() => sendHeartbeat(client), heartbeatInterval);
+          setInterval(() => {
+            logger.info('Отправка Heartbeat...');
+            sendHeartbeat(client);
+          }, heartbeatInterval);
+          logger.info(`Heartbeat будет отправляться каждые ${heartbeatInterval / 1000} секунд.`);
 
           resolve();
         } catch (error) {
-          logger.error(`Ошибка при инициализации: ${error.message}`);
+          logger.error(`Ошибка при инициализации клиента: ${error.message}`);
           reject(error);
         }
       });
 
-      // Обработчики событий
+      // Обработчики событий WebSocket
       client.on('error', (error) => logger.error(`WebSocket ошибка: ${error.message}`));
       client.on('close', () => logger.warn('WebSocket-соединение закрыто.'));
       client.on('message', (rawMsg) => handleRawMessage(rawMsg, 'message'));
@@ -129,6 +128,8 @@ async function initializeOCPPClient() {
       client.on('response', (rawRes) => handleRawMessage(rawRes, 'response'));
       client.on('call', (rawCall) => handleRawMessage(rawCall, 'call'));
 
+      // Подключение к OCPP серверу
+      logger.info('Подключаемся к OCPP-серверу...');
       client.connect().catch((error) => {
         logger.error(`Ошибка подключения: ${error.message}`);
         reject(error);
@@ -140,8 +141,14 @@ async function initializeOCPPClient() {
   });
 }
 
+/**
+ * Возвращает экземпляр OCPP-клиента.
+ * Если клиент еще не инициализирован, генерируется ошибка.
+ */
 function getClient() {
-  if (!client) throw new Error('OCPP-клиент еще не инициализирован.');
+  if (!client) {
+    throw new Error('OCPP-клиент еще не инициализирован.');
+  }
   return client;
 }
 
