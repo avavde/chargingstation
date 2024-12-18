@@ -2,16 +2,30 @@ const { RPCClient } = require('ocpp-rpc');
 const logger = require('../utils/logger');
 const config = require('../config');
 const { getModemInfo } = require('../clients/modemClient');
-const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = require('../utils/ocppUtils');
-const { sendDataTransfer } = require('../utils/ocppUtils');
+const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications, sendDataTransfer } = require('../utils/ocppUtils');
 const { exec } = require('child_process');
 
 let client;
 
 /**
+ * Установка системного времени на основе переданной даты.
+ * @param {string} dateTime - Строка с датой и временем в ISO формате.
+ */
+function setSystemTime(dateTime) {
+  const command = `date -s "${dateTime}"`;
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      logger.error(`Ошибка установки системного времени: ${error.message}`);
+    } else {
+      logger.info(`Системное время успешно установлено: ${dateTime}`);
+    }
+  });
+}
+
+/**
  * Инициализация OCPP-клиента и подключение к центральной системе.
- * После установления соединения отправляет BootNotification, начальные StatusNotification
- * и запускает периодическую отправку Heartbeat.
+ * После установления соединения отправляет BootNotification, начальные StatusNotification,
+ * синхронизирует время и запускает периодическую отправку Heartbeat.
  */
 async function initializeOCPPClient() {
   return new Promise((resolve, reject) => {
@@ -21,14 +35,14 @@ async function initializeOCPPClient() {
       client = new RPCClient({
         endpoint: config.centralSystemUrl,
         identity: config.stationName,
-        protocols: ['ocpp1.6']
+        protocols: ['ocpp1.6'],
       });
 
       logger.info(`OCPP-клиент инициализирован с endpoint: ${config.centralSystemUrl}`);
 
-      // Обработчик открытия WebSocket-соединения
       client.on('open', async () => {
-        logger.info('WebSocket-соединение с центральной системой установлено.');
+        logger.info('WebSocket-соединение установлено.');
+
         try {
           const modemInfo = await getModemInfo();
           logger.info(`Информация о модеме: ${JSON.stringify(modemInfo)}`);
@@ -36,235 +50,99 @@ async function initializeOCPPClient() {
           await sendBootNotification(client, modemInfo);
           logger.info('BootNotification успешно отправлен.');
 
-              // Синхронизация времени с сервером
-    const timeSyncResponse = await sendDataTransfer(client, {
-      vendorId: "YourVendorId", // Уникальный идентификатор для вашего приложения
-      messageId: "TimeSyncRequest",
-    });
+          // Синхронизация времени
+          const timeSyncResponse = await sendDataTransfer(client, {
+            vendorId: "YourVendorId",
+            messageId: "TimeSyncRequest",
+          });
 
-    if (timeSyncResponse && timeSyncResponse.data) {
-      const serverTime = timeSyncResponse.data.serverTime;
-      if (serverTime) {
-        const systemTime = new Date(serverTime);
-        logger.info(`Синхронизация времени: ${systemTime.toISOString()}`);
-        setSystemTime(systemTime); 
-      } else {
-        logger.warn('Сервер не вернул время в ответ на TimeSyncRequest.');
-      }
-    }
+          if (timeSyncResponse && timeSyncResponse.data?.serverTime) {
+            setSystemTime(timeSyncResponse.data.serverTime);
+          } else {
+            logger.warn('Время для синхронизации не получено.');
+          }
 
           await sendInitialStatusNotifications(client);
           logger.info('StatusNotification успешно отправлены.');
 
-          // Периодическая отправка Heartbeat с использованием конфигурации
-          const heartbeatInterval = config.heartbeatInterval || 60000; // Используем значение из конфигурации или по умолчанию 60000 мс
-
-          setInterval(() => {
-            logger.info('Отправка Heartbeat...');
-            sendHeartbeat(client);
-          }, heartbeatInterval);
+          const heartbeatInterval = config.heartbeatInterval || 60000;
+          setInterval(() => sendHeartbeat(client), heartbeatInterval);
 
           logger.info(`Heartbeat будет отправляться каждые ${heartbeatInterval / 1000} секунд.`);
-
           resolve();
         } catch (error) {
-          logger.error(`Ошибка при инициализации OCPP-клиента: ${error.message}`);
+          logger.error(`Ошибка инициализации: ${error.message}`);
           reject(error);
         }
       });
 
-      // Обработчик ошибок WebSocket
-      client.on('error', (error) => {
-        logger.error(`WebSocket ошибка: ${error.message}`);
-      });
+      // Обработка ошибок
+      client.on('error', (error) => logger.error(`WebSocket ошибка: ${error.message}`));
+      client.on('close', () => logger.warn('WebSocket-соединение закрыто.'));
 
-      // Обработчик закрытия WebSocket
-      client.on('close', () => {
-        logger.warn('WebSocket-соединение закрыто.');
-      });
+      // Универсальная обработка сообщений
+      client.on('message', (rawMsg) => handleRawMessage(rawMsg, 'message'));
+      client.on('request', (rawReq) => handleRawMessage(rawReq, 'request'));
+      client.on('response', (rawRes) => handleRawMessage(rawRes, 'response'));
+      client.on('call', (rawCall) => handleRawMessage(rawCall, 'call'));
 
-      // Обработчик всех входящих/исходящих сообщений (сырые данные - строка)
-      const { exec } = require('child_process');
-      const logger = require('../utils/logger');
-      
-      // Функция для установки системного времени
-      function setSystemTime(dateTime) {
-        const command = `date -s "${dateTime}"`;
-        exec(command, (error, stdout, stderr) => {
-          if (error) {
-            logger.error(`Ошибка установки системного времени: ${error.message}`);
-            return;
-          }
-          logger.info(`Системное время успешно установлено: ${dateTime}`);
-        });
-      }
-      
-      client.on('message', (rawMsg) => {
-        // rawMsg: { message: '["..."]', outbound: boolean }
-        logger.info(`Входящее сообщение (сырой формат): ${JSON.stringify(rawMsg, null, 2)}`);
-        try {
-          const rawMessageStr = rawMsg.message;
-          if (typeof rawMessageStr !== 'string') {
-            throw new Error('Отсутствует корректная строка для парсинга.');
-          }
-      
-          const parsedMessage = JSON.parse(rawMessageStr);
-          if (!Array.isArray(parsedMessage)) {
-            throw new Error('Входящее сообщение имеет неверный формат. Ожидался массив.');
-          }
-      
-          const [messageType, messageId, ...rest] = parsedMessage;
-      
-          if (messageType === 2) {
-            // OCPP Call (Request)
-            const [action, payload = {}] = rest;
-            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
-              type: 'Request',
-              messageId,
-              method: action,
-              payload
-            }, null, 2)}`);
-      
-            // Проверка наличия времени в payload
-            if (payload.timestamp || payload.expiryDate) {
-              const timeToSet = payload.timestamp || payload.expiryDate;
-              logger.info(`Получено время для синхронизации: ${timeToSet}`);
-              setSystemTime(timeToSet);
-            }
-          } else if (messageType === 3) {
-            // OCPP CallResult (Response)
-            const [payload = {}] = rest;
-            logger.info(`Полное входящее сообщение OCPP: ${JSON.stringify({
-              type: 'Response',
-              messageId,
-              payload
-            }, null, 2)}`);
-      
-            // Проверка наличия времени в payload
-            if (payload.timestamp || payload.expiryDate) {
-              const timeToSet = payload.timestamp || payload.expiryDate;
-              logger.info(`Получено время для синхронизации: ${timeToSet}`);
-              setSystemTime(timeToSet);
-            }
-          } else if (messageType === 4) {
-            // OCPP CallError
-            const [errorDetails] = rest;
-            logger.error(`Ошибка в сообщении OCPP: ${JSON.stringify({
-              type: 'Error',
-              messageId,
-              details: errorDetails
-            }, null, 2)}`);
-          } else {
-            throw new Error(`Неизвестный тип сообщения: ${messageType}`);
-          }
-        } catch (error) {
-          logger.error(`Ошибка при обработке входящего сообщения: ${error.message}`);
-          logger.error(`Содержимое сообщения: ${JSON.stringify(rawMsg, null, 2)}`);
-        }
-      });
-      
-
-      // Обработчик входящих запросов (уже распарсенные данные в payload)
-      client.on('request', (rawReq) => {
-        try {
-          // rawReq: { outbound: boolean, payload: [...] }
-          // payload - массив вида [2, messageId, action, payloadObj]
-          const { payload } = rawReq;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат запроса OCPP.');
-          }
-
-          const [messageType, messageId, method, reqPayload] = payload;
-
-          logger.info(`Входящий запрос OCPP:\n${JSON.stringify({
-            type: 'Request',
-            messageId: messageId || 'N/A',
-            method: method || 'Unknown',
-            payload: reqPayload || {}
-          }, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке входящего запроса: ${error.message}`);
-          logger.error(`Содержимое запроса: ${JSON.stringify(rawReq, null, 2)}`);
-        }
-      });
-
-      // Обработчик входящих ответов (уже распарсенные данные в payload)
-      client.on('response', (rawRes) => {
-        try {
-          // rawRes: { outbound: boolean, payload: [...] }
-          // payload - массив вида [3, messageId, payloadObj]
-          const { payload } = rawRes;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат ответа OCPP.');
-          }
-
-          const [messageType, messageId, resPayload] = payload;
-
-          logger.info(`Входящий ответ OCPP:\n${JSON.stringify({
-            type: 'Response',
-            messageId: messageId || 'N/A',
-            payload: resPayload || {}
-          }, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке ответа: ${error.message}`);
-          logger.error(`Содержимое ответа: ${JSON.stringify(rawRes, null, 2)}`);
-        }
-      });
-
-      // Обработчик исходящих вызовов (уже распарсенные данные в payload)
-      client.on('call', (rawCall) => {
-        try {
-          // rawCall: { outbound: boolean, payload: [...] }
-          // payload - массив вида [2, messageId, action, payloadObj] для запросов
-          // или [3, messageId, payloadObj] для ответов
-          const { payload } = rawCall;
-          if (!Array.isArray(payload)) {
-            throw new Error('Некорректный формат исходящего вызова OCPP.');
-          }
-
-          logger.info(`Исходящий вызов OCPP:\n${JSON.stringify(payload, null, 2)}`);
-        } catch (error) {
-          logger.error(`Ошибка при обработке исходящего вызова: ${error.message}`);
-          logger.error(`Содержимое вызова: ${JSON.stringify(rawCall, null, 2)}`);
-        }
-      });
-
-      logger.info('Подключаемся к OCPP-серверу...');
       client.connect().catch((error) => {
-        logger.error(`Ошибка подключения к OCPP-серверу: ${error.message}`);
+        logger.error(`Ошибка подключения: ${error.message}`);
         reject(error);
       });
     } catch (error) {
-      logger.error(`Ошибка при создании OCPP-клиента: ${error.message}`);
+      logger.error(`Ошибка создания OCPP-клиента: ${error.message}`);
       reject(error);
     }
   });
 }
 
 /**
- * Установка системного времени на основе полученной даты.
- * @param {string} dateTime - Строка с датой и временем в формате ISO.
+ * Универсальный обработчик сообщений OCPP.
+ * @param {Object} rawData - Сырой формат данных сообщения.
+ * @param {string} type - Тип события: message, request, response, call.
  */
-function setSystemTime(dateTime) {
-  const command = `date -s "${dateTime}"`;
-  exec(command, (error, stdout, stderr) => {
-    if (error) {
-      logger.error(`Ошибка установки системного времени: ${error.message}`);
-      return;
-    }
-    logger.info(`Системное время успешно установлено: ${dateTime}`);
-  });
-}
+function handleRawMessage(rawData, type) {
+  try {
+    logger.info(`Входящее событие (${type}): ${JSON.stringify(rawData, null, 2)}`);
+    const { message } = rawData;
+    const parsedMessage = JSON.parse(message);
 
+    if (!Array.isArray(parsedMessage)) {
+      throw new Error('Некорректный формат OCPP-сообщения.');
+    }
+
+    const [messageType, messageId, ...rest] = parsedMessage;
+
+    if (type === 'request' || type === 'message') {
+      const [action, payload] = rest;
+      logger.info(`Запрос: ${action}, Параметры: ${JSON.stringify(payload)}`);
+
+      if (payload?.timestamp || payload?.expiryDate) {
+        const timeToSet = payload.timestamp || payload.expiryDate;
+        setSystemTime(timeToSet);
+      }
+    } else if (type === 'response') {
+      const [payload] = rest;
+      logger.info(`Ответ: ${JSON.stringify(payload)}`);
+
+      if (payload?.timestamp || payload?.expiryDate) {
+        const timeToSet = payload.timestamp || payload.expiryDate;
+        setSystemTime(timeToSet);
+      }
+    } else if (type === 'call') {
+      logger.info(`Исходящий вызов: ${JSON.stringify(rest, null, 2)}`);
+    }
+  } catch (error) {
+    logger.error(`Ошибка при обработке события (${type}): ${error.message}`);
+  }
+}
 
 /**
  * Возвращает экземпляр OCPP-клиента.
- * Если клиент еще не инициализирован, генерируется ошибка.
  */
 function getClient() {
-  if (!client) {
-    throw new Error('OCPP-клиент еще не инициализирован.');
-  }
+  if (!client) throw new Error('OCPP-клиент еще не инициализирован.');
   return client;
 }
 
