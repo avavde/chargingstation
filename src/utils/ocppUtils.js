@@ -146,6 +146,25 @@ async function sendDiagnosticsStatusNotification(client, status) {
   }
 }
 
+
+/**
+ * Отправка запроса DataTransfer для произвольного обмена данными.
+ * @param {Object} client - Экземпляр OCPP-клиента
+ * @param {Object} payload - Полезная нагрузка DataTransfer
+ */
+async function sendDataTransfer(client, payload) {
+  try {
+    const response = await client.call('DataTransfer', payload);
+    logger.info(`DataTransfer отправлен. Ответ: ${JSON.stringify(response)}`);
+    return response;
+  } catch (error) {
+    logger.error(`Ошибка при отправке DataTransfer: ${error.message}`);
+    return null;
+  }
+}
+
+
+
 /**
  * Отправляет MeterValues (показания счётчиков). 
  * Например, может вызываться раз в N секунд или при изменении измерений.
@@ -228,4 +247,5 @@ module.exports = {
   sendDiagnosticsStatusNotification,
   sendMeterValues,
   sendInitialStatusNotifications,
+  sendDataTransfer
 };

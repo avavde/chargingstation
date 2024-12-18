@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const config = require('../config');
 const { getModemInfo } = require('../clients/modemClient');
 const { sendBootNotification, sendHeartbeat, sendInitialStatusNotifications } = require('../utils/ocppUtils');
+const { sendDataTransfer } = require('../utils/ocppUtils');
 
 let client;
 
@@ -33,6 +34,23 @@ async function initializeOCPPClient() {
 
           await sendBootNotification(client, modemInfo);
           logger.info('BootNotification успешно отправлен.');
+
+              // Синхронизация времени с сервером
+    const timeSyncResponse = await sendDataTransfer(client, {
+      vendorId: "YourVendorId", // Уникальный идентификатор для вашего приложения
+      messageId: "TimeSyncRequest",
+    });
+
+    if (timeSyncResponse && timeSyncResponse.data) {
+      const serverTime = timeSyncResponse.data.serverTime;
+      if (serverTime) {
+        const systemTime = new Date(serverTime);
+        logger.info(`Синхронизация времени: ${systemTime.toISOString()}`);
+        setSystemTime(systemTime); // Функция для установки системного времени
+      } else {
+        logger.warn('Сервер не вернул время в ответ на TimeSyncRequest.');
+      }
+    }
 
           await sendInitialStatusNotifications(client);
           logger.info('StatusNotification успешно отправлены.');
@@ -191,6 +209,8 @@ async function initializeOCPPClient() {
     }
   });
 }
+
+
 
 /**
  * Возвращает экземпляр OCPP-клиента.
