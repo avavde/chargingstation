@@ -1,5 +1,5 @@
 {
-  "centralSystemUrl": "wss://proxy.volttime.com/v1/",
+  "centralSystemUrl": "wss://proxy.volttime.com/v1/CP0001",
   "protocol": "OCPP 1.6 JSON",
   "identity": "CP0001",
   "stationName": "CP0001",
